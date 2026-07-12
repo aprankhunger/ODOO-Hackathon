@@ -1,42 +1,35 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Activity, Server, AlertTriangle, CheckCircle2, Shield, Clock, Thermometer } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 const Dashboard = () => {
-  const [telemetryData, setTelemetryData] = useState([]);
-  const [currentStatus, setCurrentStatus] = useState({
-    cpu: 0,
-    ram: 0,
-    disk: 0,
-    status: 'Unknown',
-    uptime: 'N/A',
-    battery: 'N/A',
-    security: 'Unknown',
-    temperature: 'N/A',
-    top_processes: [],
-    recent_errors: [],
-    disk_health: [],
-    software: []
-  });
-  
+  // Store the latest payload for each device
+  const [deviceMap, setDeviceMap] = useState({});
+  const [telemetryHistory, setTelemetryHistory] = useState([]);
   const [connectionStatus, setConnectionStatus] = useState('Connecting...');
 
   useEffect(() => {
-    const ws = new WebSocket('ws://localhost:8000/ws/telemetry');
+    const ws = new WebSocket('ws://localhost:8001/ws/dashboard');
     
-    ws.onopen = () => setConnectionStatus('Connected (Live)');
+    ws.onopen = () => setConnectionStatus('Connected to Central');
     ws.onclose = () => setConnectionStatus('Disconnected');
     ws.onerror = () => setConnectionStatus('Connection Error');
     
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
+      const { device_id, telemetry } = data;
       
-      setCurrentStatus(data);
+      setDeviceMap(prev => ({
+        ...prev,
+        [device_id]: telemetry
+      }));
 
-      setTelemetryData(prev => {
-        const timeStr = new Date(data.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-        const newPoint = { time: timeStr, cpu: data.cpu, ram: data.ram };
+      // For the global chart, we can just track average CPU/RAM across all devices, 
+      // or track a specific device. For MVP, let's track the first device's data.
+      setTelemetryHistory(prev => {
+        const timeStr = new Date(telemetry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        const newPoint = { time: timeStr, cpu: telemetry.cpu, ram: telemetry.ram };
         const newArray = [...prev, newPoint];
         if (newArray.length > 15) return newArray.slice(newArray.length - 15);
         return newArray;
@@ -46,11 +39,22 @@ const Dashboard = () => {
     return () => ws.close();
   }, []);
 
+  // Compute aggregated stats
+  const totalAssets = Object.keys(deviceMap).length;
+  const criticalAssets = Object.values(deviceMap).filter(t => t.status === 'Critical').length;
+  const healthyAssets = totalAssets - criticalAssets;
+  
+  // Pick a single device to show deep diagnostics (e.g. the first one to connect)
+  const activeDevice = Object.values(deviceMap)[0] || {
+    cpu: 0, ram: 0, disk: 0, status: 'Unknown', uptime: 'N/A', battery: 'N/A',
+    security: 'Unknown', temperature: 'N/A', top_processes: [], recent_errors: [], disk_health: [], hostname: 'N/A'
+  };
+
   const stats = [
-    { title: 'Current Status', value: currentStatus.status, icon: currentStatus.status === 'Critical' ? AlertTriangle : CheckCircle2, color: currentStatus.status === 'Critical' ? 'text-danger' : 'text-success', bg: currentStatus.status === 'Critical' ? 'bg-danger/10' : 'bg-success/10' },
-    { title: 'Security', value: currentStatus.security, icon: Shield, color: currentStatus.security === 'Protected' ? 'text-success' : 'text-warning', bg: currentStatus.security === 'Protected' ? 'bg-success/10' : 'bg-warning/10' },
-    { title: 'Uptime', value: currentStatus.uptime, icon: Clock, color: 'text-blue-500', bg: 'bg-blue-500/10' },
-    { title: 'Temperature', value: currentStatus.temperature, icon: Thermometer, color: 'text-orange-500', bg: 'bg-orange-500/10' },
+    { title: 'Total Assets', value: totalAssets.toString(), icon: Server, color: 'text-blue-500', bg: 'bg-blue-500/10' },
+    { title: 'Healthy Devices', value: healthyAssets.toString(), icon: CheckCircle2, color: 'text-success', bg: 'bg-success/10' },
+    { title: 'Critical Failures', value: criticalAssets.toString(), icon: AlertTriangle, color: criticalAssets > 0 ? 'text-danger' : 'text-gray-500', bg: criticalAssets > 0 ? 'bg-danger/10' : 'bg-gray-800' },
+    { title: 'Security (Active Node)', value: activeDevice.security, icon: Shield, color: activeDevice.security === 'Protected' ? 'text-success' : 'text-warning', bg: activeDevice.security === 'Protected' ? 'bg-success/10' : 'bg-warning/10' },
   ];
 
   return (
@@ -64,8 +68,8 @@ const Dashboard = () => {
         <div>
           <h2 className="text-3xl font-bold tracking-tight mb-2">Fleet Overview</h2>
           <div className="flex items-center space-x-2">
-            <div className={`w-2 h-2 rounded-full ${connectionStatus === 'Connected (Live)' ? 'bg-success animate-pulse' : 'bg-danger'}`}></div>
-            <p className="text-gray-400 text-sm">Agent Status: {connectionStatus}</p>
+            <div className={`w-2 h-2 rounded-full ${connectionStatus.includes('Connected') ? 'bg-success animate-pulse' : 'bg-danger'}`}></div>
+            <p className="text-gray-400 text-sm">Central Hub: {connectionStatus}</p>
           </div>
         </div>
         <button className="bg-primary hover:bg-blue-600 text-white shadow-lg shadow-blue-500/30 transition-all">
@@ -99,10 +103,11 @@ const Dashboard = () => {
       {/* Charts / Lists */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-8">
         <div className="lg:col-span-2 glass-card p-6 min-h-[400px]">
-          <h3 className="text-xl font-bold mb-6 border-b border-border pb-4">Live Hardware Telemetry</h3>
+          <h3 className="text-xl font-bold mb-2">Live Hardware Telemetry</h3>
+          <p className="text-gray-400 text-sm mb-4 border-b border-border pb-4">Displaying node: {activeDevice.hostname}</p>
           <div className="h-[300px] w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={telemetryData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+              <AreaChart data={telemetryHistory} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorCpu" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
@@ -128,25 +133,25 @@ const Dashboard = () => {
         </div>
         
         <div className="glass-card p-6 min-h-[400px] flex flex-col">
-          <h3 className="text-xl font-bold mb-4 border-b border-border pb-4">Deep Diagnostics</h3>
+          <h3 className="text-xl font-bold mb-4 border-b border-border pb-4">Deep Diagnostics ({activeDevice.hostname})</h3>
           <div className="space-y-4 flex-1 overflow-y-auto pr-2">
             <div className="bg-surfaceHover p-4 rounded-xl border border-border">
               <p className="text-xs text-gray-400 mb-1">Disk Usage</p>
               <div className="flex items-center space-x-3 mt-1 mb-2">
                 <div className="flex-1 h-2 bg-gray-700 rounded-full overflow-hidden">
-                  <div className="h-full bg-success" style={{ width: `${currentStatus.disk}%` }}></div>
+                  <div className="h-full bg-success" style={{ width: `${activeDevice.disk}%` }}></div>
                 </div>
-                <span className="text-sm font-medium">{currentStatus.disk}%</span>
+                <span className="text-sm font-medium">{activeDevice.disk}%</span>
               </div>
-              {currentStatus.disk_health && currentStatus.disk_health[0] && (
-                <p className="text-xs text-gray-400">SMART: {currentStatus.disk_health[0].status}</p>
+              {activeDevice.disk_health && activeDevice.disk_health[0] && (
+                <p className="text-xs text-gray-400">SMART: {activeDevice.disk_health[0].status}</p>
               )}
             </div>
             
             <div className="bg-surfaceHover p-4 rounded-xl border border-border">
               <p className="text-xs text-gray-400 mb-2">Top Processes (CPU)</p>
               <ul className="space-y-2">
-                {currentStatus.top_processes && currentStatus.top_processes.map((proc, i) => (
+                {activeDevice.top_processes && activeDevice.top_processes.map((proc, i) => (
                   <li key={i} className="flex justify-between text-sm">
                     <span className="truncate w-32">{proc.name}</span>
                     <span className="text-warning">{proc.cpu_percent}%</span>
@@ -157,9 +162,9 @@ const Dashboard = () => {
 
             <div className="bg-surfaceHover p-4 rounded-xl border border-border">
               <p className="text-xs text-gray-400 mb-2">System Errors (Event Log)</p>
-              {currentStatus.recent_errors && currentStatus.recent_errors.length > 0 ? (
+              {activeDevice.recent_errors && activeDevice.recent_errors.length > 0 ? (
                 <ul className="space-y-2">
-                  {currentStatus.recent_errors.map((err, i) => (
+                  {activeDevice.recent_errors.map((err, i) => (
                     <li key={i} className="text-xs text-danger flex space-x-2">
                       <AlertTriangle size={12} className="flex-shrink-0 mt-0.5" />
                       <span className="truncate">{err.source} (ID: {err.id})</span>
