@@ -1,4 +1,5 @@
 import asyncio
+import os
 import psutil
 import subprocess
 import time
@@ -22,8 +23,10 @@ except ImportError:
     win32evtlog = None
     IS_WINDOWS = False
 
-CENTRAL_BACKEND_URL = "http://localhost:8001"
-CENTRAL_WS_URL = "ws://localhost:8001"
+# Set INTELLIASSET_BACKEND_URL to point the agent at a hosted backend,
+# e.g. INTELLIASSET_BACKEND_URL=https://api.yourdomain.com python main.py
+CENTRAL_BACKEND_URL = os.getenv("INTELLIASSET_BACKEND_URL", "http://localhost:8001")
+CENTRAL_WS_URL = CENTRAL_BACKEND_URL.replace("https://", "wss://").replace("http://", "ws://")
 
 # Cache for slow metrics
 slow_metrics_cache = {

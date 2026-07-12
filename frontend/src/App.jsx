@@ -16,7 +16,7 @@ import Assets from './pages/Assets';
 import Audits from './pages/Audits';
 import Reports from './pages/Reports';
 
-const API = 'http://localhost:8001';
+import { API_BASE as API } from './lib/api';
 
 function App() {
   const [user, setUser] = useState(null); // { id, name, email, role, token } or { role: 'technician', devices }

@@ -216,7 +216,7 @@ Connected! Streaming telemetry...`}</code>
                   <p>{'Registering device: AA:BB:CC:DD:EE:FF'}</p>
                   <p className="text-success">{'✓ Device registered successfully'}</p>
                   <p className="mt-4">{'Connecting to backend...'}</p>
-                  <p className="text-success">{'✓ Connected to ws://localhost:8001'}</p>
+                  <p className="text-success">{'✓ Connected to central hub'}</p>
                   <p className="mt-4">{'Streaming telemetry: CPU(45%), RAM(62%), Disk(38%)'}</p>
                   <p className="text-success">{'✓ Data sent every 2 seconds'}</p>
                   <p className="mt-4 opacity-50 animate-pulse">{'► monitoring active...'}</p>

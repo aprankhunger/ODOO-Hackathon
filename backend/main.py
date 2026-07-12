@@ -71,10 +71,15 @@ ensure_columns()
 
 app = FastAPI(title="IntelliAsset Central Backend")
 
+# CORS: set ALLOWED_ORIGINS to a comma-separated list of frontend URLs in
+# production (e.g. "https://intelliasset.vercel.app"). Defaults to "*" for
+# local development.
+_origins = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "*").split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_origins,
+    allow_credentials="*" not in _origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -186,18 +191,29 @@ seed_activity_data()
 # Auth helpers
 # ---------------------------------------------------------------------------
 
+PBKDF2_ITERATIONS = 260_000
+
 def hash_password(password: str, salt: str = None) -> str:
+    """PBKDF2-HMAC-SHA256 with per-user salt (format: pbkdf2$salt$digest)."""
     if salt is None:
-        salt = secrets.token_hex(8)
+        salt = secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256", password.encode(), salt.encode(), PBKDF2_ITERATIONS
+    ).hex()
+    return f"pbkdf2${salt}${digest}"
+
+def _legacy_hash(password: str, salt: str) -> str:
+    """Old single-round SHA-256 format (salt$digest) kept for existing users."""
     digest = hashlib.sha256((salt + password).encode()).hexdigest()
     return f"{salt}${digest}"
 
 def verify_password(password: str, stored: str) -> bool:
-    try:
-        salt, _ = stored.split("$", 1)
-    except ValueError:
-        return False
-    return secrets.compare_digest(hash_password(password, salt), stored)
+    parts = stored.split("$")
+    if len(parts) == 3 and parts[0] == "pbkdf2":
+        return secrets.compare_digest(hash_password(password, parts[1]), stored)
+    if len(parts) == 2:  # legacy sha256 hash
+        return secrets.compare_digest(_legacy_hash(password, parts[0]), stored)
+    return False
 
 def serialize_user(u: User):
     return {
@@ -853,8 +869,11 @@ def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
     user.reset_code = "".join(random.choices(string.digits, k=6))
     db.commit()
     log_action(db, actor=email, actor_role=user.role, action="PASSWORD_RESET_REQUESTED", target=None, details="Requested a password reset code.")
-    # Demo: return the code directly (no email service configured)
-    return {"message": "Reset code generated", "demo_reset_code": user.reset_code}
+    # DEMO_MODE=true returns the code in the response (no email service).
+    # In production, leave DEMO_MODE unset and deliver codes via email instead.
+    if os.getenv("DEMO_MODE", "true").lower() == "true":
+        return {"message": "Reset code generated", "demo_reset_code": user.reset_code}
+    return {"message": "Reset code generated. Check your email."}
 
 @app.post("/api/auth/reset-password")
 def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):

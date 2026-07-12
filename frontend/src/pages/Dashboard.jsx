@@ -6,7 +6,7 @@ import {
   Undo2, AlertTriangle, Plus, CalendarPlus, Hammer, X,
 } from 'lucide-react';
 
-const API = 'http://localhost:8001';
+import { API_BASE as API } from '../lib/api';
 
 const KPI_CONFIG = [
   { key: 'assets_available', label: 'Assets Available', icon: PackageCheck, accent: 'bg-primary text-white' },

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Shield, Wrench, ArrowRight, Lock, UserPlus, KeyRound, Home } from 'lucide-react';
 
-const API = 'http://localhost:8001';
+import { API_BASE as API } from '../lib/api';
 
 const inputClass =
   'w-full bg-surface border-2 border-ink px-4 py-3 text-ink placeholder:text-muted focus:outline-none focus:shadow-bauhaus-sm transition-shadow';

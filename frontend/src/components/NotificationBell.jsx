@@ -6,7 +6,7 @@ import {
   ArrowRightLeft, AlertTriangle, SearchX, CheckCheck, PlusCircle,
 } from 'lucide-react';
 
-const API_BASE = 'http://localhost:8001';
+import { API_BASE, WS_BASE } from '../lib/api';
 
 const TYPE_ICONS = {
   asset_assigned: Package,
@@ -60,7 +60,7 @@ const NotificationBell = ({ role = 'admin' }) => {
   useEffect(() => {
     fetchNotifications();
 
-    const ws = new WebSocket('ws://localhost:8001/ws/dashboard');
+    const ws = new WebSocket(`${WS_BASE}/ws/dashboard`);
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Server, AlertTriangle, CheckCircle2, Shield, UserPlus, X } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { API_BASE, WS_BASE } from '../lib/api';
 
 const Fleet = () => {
   const [deviceMap, setDeviceMap] = useState({});
@@ -13,7 +14,7 @@ const Fleet = () => {
   const [assignedCode, setAssignedCode] = useState(null);
 
   useEffect(() => {
-    const ws = new WebSocket('ws://localhost:8001/ws/dashboard');
+    const ws = new WebSocket(`${WS_BASE}/ws/dashboard`);
 
     ws.onopen = () => setConnectionStatus('Connected to Central');
     ws.onclose = () => setConnectionStatus('Disconnected');
@@ -56,7 +57,7 @@ const Fleet = () => {
     setIsAssigning(true);
     setAssignedCode(null);
     try {
-      const res = await fetch('http://localhost:8001/api/admin/assign', {
+      const res = await fetch(`${API_BASE}/api/admin/assign`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ device_id: deviceId })

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Plus, Search, X, AlertTriangle } from 'lucide-react';
 
-const API = 'http://localhost:8001';
+import { API_BASE as API } from '../lib/api';
 
 const STATUS_CHIP = {
   available: 'bg-accentYellow text-ink',

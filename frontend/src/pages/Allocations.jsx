@@ -3,7 +3,7 @@ import {
   Package, ArrowRightLeft, History, X, Check, AlertTriangle, CornerDownLeft,
 } from 'lucide-react';
 
-const API = 'http://localhost:8001';
+import { API_BASE as API } from '../lib/api';
 
 const STATUS_CHIP = {
   available: 'bg-accentYellow text-ink',
