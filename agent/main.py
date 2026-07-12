@@ -33,7 +33,26 @@ except ImportError:
 
 # Set INTELLIASSET_BACKEND_URL to point the agent at a hosted backend,
 # e.g. INTELLIASSET_BACKEND_URL=https://api.yourdomain.com python main.py
-CENTRAL_BACKEND_URL = os.getenv("INTELLIASSET_BACKEND_URL", "http://localhost:8001")
+CENTRAL_BACKEND_URL = os.getenv("INTELLIASSET_BACKEND_URL", "").strip().rstrip("/")
+
+if not CENTRAL_BACKEND_URL:
+    CENTRAL_BACKEND_URL = "http://localhost:8001"
+    logging.warning("=" * 70)
+    logging.warning("INTELLIASSET_BACKEND_URL is NOT set!")
+    logging.warning(f"Falling back to {CENTRAL_BACKEND_URL} — telemetry will NOT")
+    logging.warning("reach your hosted dashboard. To fix, set the env var first:")
+    logging.warning('  Windows (PowerShell): $env:INTELLIASSET_BACKEND_URL="https://intelliasset-backend.onrender.com"')
+    logging.warning('  macOS/Linux:          export INTELLIASSET_BACKEND_URL="https://intelliasset-backend.onrender.com"')
+    logging.warning("then re-run the agent.")
+    logging.warning("=" * 70)
+    if not sys.stdin.isatty():
+        logging.error("Fatal: refusing to start against localhost in non-interactive mode.")
+        sys.exit(1)
+    answer = input("Continue with localhost anyway? [y/N]: ").strip().lower()
+    if answer != "y":
+        logging.info("Exiting. Set INTELLIASSET_BACKEND_URL and re-run.")
+        sys.exit(1)
+
 CENTRAL_WS_URL = CENTRAL_BACKEND_URL.replace("https://", "wss://").replace("http://", "ws://")
 
 # Cache for slow metrics
