@@ -3,6 +3,7 @@ import os
 import random
 import string
 import json
+import time
 import hashlib
 import secrets
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, Header
@@ -79,6 +80,11 @@ app.add_middleware(
 )
 
 dashboard_connections = []
+
+# Throttle historical telemetry DB writes: live dashboard stays real-time via
+# WebSockets, but we only persist one telemetry row per device per interval.
+TELEMETRY_DB_WRITE_INTERVAL = 60  # seconds
+last_db_write = {}
 
 # ---------------------------------------------------------------------------
 # Notifications & Audit Log helpers
@@ -443,22 +449,27 @@ async def websocket_ingest(websocket: WebSocket, device_id: str, db: Session = D
                 except:
                     pass
             
-            cpu = data.get("cpu", 0)
-            ram = data.get("ram", 0)
-            disk = data.get("disk", 0)
-            status = data.get("status", "Unknown")
-            
-            new_telemetry = Telemetry(
-                device_id=device_id,
-                cpu_percent=cpu,
-                ram_percent=ram,
-                disk_percent=disk,
-                status=status,
-                detailed_metrics=data 
-            )
-            
-            db.add(new_telemetry)
-            db.commit()
+            # Persist to DB at most once per interval per device
+            # (first ping always writes so new devices appear immediately)
+            now = time.time()
+            if now - last_db_write.get(device_id, 0) > TELEMETRY_DB_WRITE_INTERVAL:
+                cpu = data.get("cpu", 0)
+                ram = data.get("ram", 0)
+                disk = data.get("disk", 0)
+                status = data.get("status", "Unknown")
+
+                new_telemetry = Telemetry(
+                    device_id=device_id,
+                    cpu_percent=cpu,
+                    ram_percent=ram,
+                    disk_percent=disk,
+                    status=status,
+                    detailed_metrics=data
+                )
+
+                db.add(new_telemetry)
+                db.commit()
+                last_db_write[device_id] = now
             
     except WebSocketDisconnect:
         print(f"Agent {device_id} disconnected")
