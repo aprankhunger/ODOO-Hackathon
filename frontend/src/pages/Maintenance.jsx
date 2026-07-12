@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Wrench, X, Camera, KeyRound, AlertTriangle } from 'lucide-react';
 
-const API = 'http://localhost:8001';
+import { API_BASE as API } from '../lib/api';
 
 const STATUS_CHIP = {
   pending: 'bg-accentYellow text-ink',

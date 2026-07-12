@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { ClipboardCheck, X, AlertTriangle, Lock, FileWarning, ChevronLeft } from 'lucide-react';
 
-const API = 'http://localhost:8001';
+import { API_BASE as API } from '../lib/api';
 
 const RESULT_CHIP = {
   verified: 'bg-accentYellow text-ink',

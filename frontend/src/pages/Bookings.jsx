@@ -3,7 +3,7 @@ import {
   CalendarDays, ChevronLeft, ChevronRight, Plus, X, Check, AlertTriangle,
 } from 'lucide-react';
 
-const API = 'http://localhost:8001';
+import { API_BASE as API } from '../lib/api';
 
 const HOURS = Array.from({ length: 12 }, (_, i) => i + 8); // 8:00 - 20:00
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];

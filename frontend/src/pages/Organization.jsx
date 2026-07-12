@@ -3,7 +3,7 @@ import {
   Building2, Tags, Users, Plus, Pencil, X, Check,
 } from 'lucide-react';
 
-const API = 'http://localhost:8001';
+import { API_BASE as API } from '../lib/api';
 
 const ROLE_LABELS = {
   admin: 'Admin',
@@ -210,7 +210,7 @@ const Organization = () => {
               <div>
                 <label htmlFor="dept-head" className={labelClass}>Department Head</label>
                 <select id="dept-head" value={deptForm.head_user_id || ''} onChange={(e) => setDeptForm({ ...deptForm, head_user_id: e.target.value })} className={inputClass}>
-                  <option value="">— None —</option>
+                  <option value="">— None ��</option>
                   {users.filter((u) => u.role !== 'admin').map((u) => (
                     <option key={u.id} value={u.id}>{u.name}</option>
                   ))}

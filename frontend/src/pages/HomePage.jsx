@@ -216,7 +216,7 @@ Connected! Streaming telemetry...`}</code>
                   <p>{'Registering device: AA:BB:CC:DD:EE:FF'}</p>
                   <p className="text-success">{'✓ Device registered successfully'}</p>
                   <p className="mt-4">{'Connecting to backend...'}</p>
-                  <p className="text-success">{'✓ Connected to ws://localhost:8001'}</p>
+                  <p className="text-success">{'✓ Connected to central hub'}</p>
                   <p className="mt-4">{'Streaming telemetry: CPU(45%), RAM(62%), Disk(38%)'}</p>
                   <p className="text-success">{'✓ Data sent every 2 seconds'}</p>
                   <p className="mt-4 opacity-50 animate-pulse">{'► monitoring active...'}</p>
@@ -363,7 +363,7 @@ Connected! Streaming telemetry...`}</code>
           <div className="border-t-2 border-ink pt-8">
             <div className="flex flex-col md:flex-row items-center justify-between">
               <p className="text-sm text-muted">
-                © 2024 IntelliAsset. All rights reserved.
+                © 2026 IntelliAsset. All rights reserved.
               </p>
               <p className="text-sm font-bold text-primary mt-4 md:mt-0">
                 Designed & Built by <span className="uppercase">Apran Khunger</span>

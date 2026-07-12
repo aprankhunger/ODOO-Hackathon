@@ -6,7 +6,7 @@ import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, Cell,
 } from 'recharts';
 
-const API = 'http://localhost:8001';
+import { API_BASE as API } from '../lib/api';
 
 const authHeaders = () => ({
   'Content-Type': 'application/json',
