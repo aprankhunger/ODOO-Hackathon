@@ -14,7 +14,8 @@ from dotenv import load_dotenv
 from database import engine, get_db, SessionLocal
 from models import (
     Asset, Telemetry, TechnicianCode, Notification, AuditLog,
-    User, Department, AssetCategory, AssetItem, Booking, Transfer, Base,
+    User, Department, AssetCategory, AssetItem, Booking, Transfer,
+    AllocationHistory, Base,
 )
 from pydantic import BaseModel
 
@@ -35,6 +36,35 @@ if GEMINI_API_KEY and GEMINI_API_KEY != "put_your_key_here" and genai:
 
 # Create tables if they don't exist
 Base.metadata.create_all(bind=engine)
+
+# Lightweight SQLite migration: add new columns to existing tables if missing
+def ensure_columns():
+    from sqlalchemy import text
+    new_columns = {
+        "asset_items": [
+            ("is_bookable", "BOOLEAN DEFAULT 0"),
+            ("overdue_flagged", "BOOLEAN DEFAULT 0"),
+        ],
+        "bookings": [
+            ("reminder_sent", "BOOLEAN DEFAULT 0"),
+        ],
+        "transfers": [
+            ("from_user_id", "INTEGER"),
+            ("to_user_id", "INTEGER"),
+            ("approved_by", "INTEGER"),
+            ("note", "VARCHAR"),
+            ("resolved_at", "DATETIME"),
+        ],
+    }
+    with engine.connect() as conn:
+        for table, cols in new_columns.items():
+            existing = {row[1] for row in conn.execute(text(f"PRAGMA table_info({table})"))}
+            for col_name, col_def in cols:
+                if col_name not in existing:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_def}"))
+        conn.commit()
+
+ensure_columns()
 
 app = FastAPI(title="IntelliAsset Central Backend")
 
@@ -299,6 +329,48 @@ def seed_org_data():
         db.close()
 
 seed_org_data()
+
+def seed_booking_resources():
+    """Ensure bookable resources exist (runs on both fresh and existing DBs)."""
+    db = SessionLocal()
+    try:
+        if db.query(AssetItem).filter(AssetItem.asset_tag == "RM-B2").first() is not None:
+            return
+
+        now = datetime.utcnow()
+
+        rooms_cat = db.query(AssetCategory).filter(AssetCategory.name == "Meeting Rooms").first()
+        if not rooms_cat:
+            rooms_cat = AssetCategory(name="Meeting Rooms", description="Bookable meeting and conference rooms", custom_fields=["Capacity", "Floor"], status="active")
+            db.add(rooms_cat)
+            db.commit()
+            db.refresh(rooms_cat)
+
+        # Mark existing AV equipment as bookable
+        av_cat = db.query(AssetCategory).filter(AssetCategory.name == "AV Equipment").first()
+        if av_cat:
+            for item in db.query(AssetItem).filter(AssetItem.category_id == av_cat.id).all():
+                item.is_bookable = True
+
+        room_b2 = AssetItem(asset_tag="RM-B2", name="Room B2", category_id=rooms_cat.id, status="available", is_bookable=True)
+        room_a1 = AssetItem(asset_tag="RM-A1", name="Room A1", category_id=rooms_cat.id, status="available", is_bookable=True)
+        db.add(room_b2)
+        db.add(room_a1)
+        db.commit()
+        db.refresh(room_b2)
+
+        # Seed Room B2 with a 9:00-10:00 booking tomorrow (demo the overlap example)
+        ananya = db.query(User).filter(User.email == "ananya.iyer@intelliasset.com").first()
+        if ananya:
+            tomorrow_9 = (now + timedelta(days=1)).replace(hour=9, minute=0, second=0, microsecond=0)
+            db.add(Booking(asset_item_id=room_b2.id, user_id=ananya.id, start_time=tomorrow_9, end_time=tomorrow_9 + timedelta(hours=1), status="confirmed"))
+
+        db.commit()
+        print("Seeded bookable resources (Room B2, Room A1, AV equipment).")
+    finally:
+        db.close()
+
+seed_booking_resources()
 
 class AssignRequest(BaseModel):
     device_id: str
@@ -1003,6 +1075,487 @@ def dashboard_summary(user: User = Depends(get_current_user), db: Session = Depe
         "overdue_returns": [serialize_item(i) for i in overdue_items],
         "upcoming_returns": [serialize_item(i) for i in upcoming_items],
     }
+
+# ---------------------------------------------------------------------------
+# Asset Allocation & Transfer endpoints (Screen 5)
+# ---------------------------------------------------------------------------
+
+MANAGER_ROLES = ("admin", "department_head", "asset_manager")
+
+def serialize_asset_item(item: AssetItem, db: Session, now: datetime = None):
+    now = now or datetime.utcnow()
+    holder = db.query(User).filter(User.id == item.assigned_to_user_id).first() if item.assigned_to_user_id else None
+    cat = db.query(AssetCategory).filter(AssetCategory.id == item.category_id).first() if item.category_id else None
+    dept = db.query(Department).filter(Department.id == item.department_id).first() if item.department_id else None
+    is_overdue = bool(item.status == "allocated" and item.expected_return_date and item.expected_return_date < now)
+    return {
+        "id": item.id,
+        "asset_tag": item.asset_tag,
+        "name": item.name,
+        "category": cat.name if cat else None,
+        "department": dept.name if dept else None,
+        "status": item.status,
+        "held_by": holder.name if holder else None,
+        "held_by_id": holder.id if holder else None,
+        "expected_return_date": item.expected_return_date.isoformat() if item.expected_return_date else None,
+        "is_overdue": is_overdue,
+        "is_bookable": bool(item.is_bookable),
+    }
+
+@app.get("/api/users/basic")
+def list_users_basic(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Minimal user list (id + name) for allocation/transfer target pickers — any authenticated user."""
+    users = db.query(User).filter(User.status == "active", User.role != "admin").order_by(User.name).all()
+    return {"users": [{"id": u.id, "name": u.name} for u in users]}
+
+@app.get("/api/asset-items")
+def list_asset_items(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    items = db.query(AssetItem).order_by(AssetItem.asset_tag).all()
+    now = datetime.utcnow()
+    return {"items": [serialize_asset_item(i, db, now) for i in items]}
+
+class AllocateRequest(BaseModel):
+    user_id: int
+    expected_return_date: str | None = None  # ISO date
+
+@app.post("/api/asset-items/{item_id}/allocate")
+async def allocate_asset(item_id: int, req: AllocateRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    item = db.query(AssetItem).filter(AssetItem.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    # Conflict rule: can't allocate an asset that's already taken
+    if item.status == "allocated":
+        holder = db.query(User).filter(User.id == item.assigned_to_user_id).first()
+        raise HTTPException(status_code=409, detail={
+            "code": "already_allocated",
+            "message": f"{item.name} ({item.asset_tag}) is currently held by {holder.name if holder else 'another user'}.",
+            "held_by": holder.name if holder else None,
+            "held_by_id": holder.id if holder else None,
+        })
+    if item.status in ("maintenance", "in_transfer"):
+        raise HTTPException(status_code=409, detail={
+            "code": "unavailable",
+            "message": f"{item.name} ({item.asset_tag}) is currently in {item.status.replace('_', ' ')} and cannot be allocated.",
+        })
+
+    target = db.query(User).filter(User.id == req.user_id, User.status == "active").first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Employee not found or inactive")
+
+    ret_date = None
+    if req.expected_return_date:
+        try:
+            ret_date = datetime.fromisoformat(req.expected_return_date)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid expected return date")
+
+    item.status = "allocated"
+    item.assigned_to_user_id = target.id
+    item.expected_return_date = ret_date
+    item.overdue_flagged = False
+    db.add(AllocationHistory(asset_item_id=item.id, user_id=target.id, allocated_at=datetime.utcnow(), expected_return_date=ret_date))
+    db.commit()
+
+    log_action(db, actor=user.email, actor_role=user.role, action="ASSET_ALLOCATED", target=item.asset_tag,
+               details=f"Allocated {item.name} to {target.name}" + (f" (return by {ret_date.date()})" if ret_date else "") + ".")
+    await create_notification(db, recipient_role="all", type="asset_assigned", title="Asset Assigned",
+                              message=f"{item.name} ({item.asset_tag}) has been assigned to {target.name}.", severity="info")
+
+    return {"item": serialize_asset_item(item, db)}
+
+class ReturnRequest(BaseModel):
+    condition_notes: str | None = None
+
+@app.post("/api/asset-items/{item_id}/return")
+async def return_asset(item_id: int, req: ReturnRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    item = db.query(AssetItem).filter(AssetItem.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    if item.status != "allocated":
+        raise HTTPException(status_code=400, detail="Asset is not currently allocated")
+
+    holder = db.query(User).filter(User.id == item.assigned_to_user_id).first()
+    open_hist = db.query(AllocationHistory).filter(
+        AllocationHistory.asset_item_id == item.id,
+        AllocationHistory.returned_at == None,
+    ).order_by(AllocationHistory.allocated_at.desc()).first()
+    if open_hist:
+        open_hist.returned_at = datetime.utcnow()
+        open_hist.condition_notes = req.condition_notes
+        open_hist.released_by = "return"
+
+    item.status = "available"
+    item.assigned_to_user_id = None
+    item.expected_return_date = None
+    item.overdue_flagged = False
+    db.commit()
+
+    log_action(db, actor=user.email, actor_role=user.role, action="ASSET_RETURNED", target=item.asset_tag,
+               details=f"{item.name} returned by {holder.name if holder else 'unknown'}." + (f" Condition: {req.condition_notes}" if req.condition_notes else ""))
+    await create_notification(db, recipient_role="all", type="asset_returned", title="Asset Returned",
+                              message=f"{item.name} ({item.asset_tag}) was returned and is now available.", severity="success")
+
+    return {"item": serialize_asset_item(item, db)}
+
+@app.get("/api/asset-items/{item_id}/history")
+def asset_history(item_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    rows = db.query(AllocationHistory).filter(AllocationHistory.asset_item_id == item_id).order_by(AllocationHistory.allocated_at.desc()).all()
+    result = []
+    for h in rows:
+        holder = db.query(User).filter(User.id == h.user_id).first()
+        result.append({
+            "id": h.id,
+            "user_name": holder.name if holder else "Unknown",
+            "allocated_at": h.allocated_at.isoformat() if h.allocated_at else None,
+            "returned_at": h.returned_at.isoformat() if h.returned_at else None,
+            "expected_return_date": h.expected_return_date.isoformat() if h.expected_return_date else None,
+            "condition_notes": h.condition_notes,
+            "released_by": h.released_by,
+        })
+    return {"history": result}
+
+class TransferRequest(BaseModel):
+    asset_item_id: int
+    to_user_id: int
+    note: str | None = None
+
+def serialize_transfer(t: Transfer, db: Session):
+    item = db.query(AssetItem).filter(AssetItem.id == t.asset_item_id).first()
+    from_user = db.query(User).filter(User.id == t.from_user_id).first() if t.from_user_id else None
+    to_user = db.query(User).filter(User.id == t.to_user_id).first() if t.to_user_id else None
+    requester = db.query(User).filter(User.id == t.requested_by).first() if t.requested_by else None
+    approver = db.query(User).filter(User.id == t.approved_by).first() if t.approved_by else None
+    return {
+        "id": t.id,
+        "asset_tag": item.asset_tag if item else None,
+        "asset_name": item.name if item else None,
+        "from_user": from_user.name if from_user else (t.from_location or None),
+        "to_user": to_user.name if to_user else (t.to_location or None),
+        "requested_by": requester.name if requester else None,
+        "approved_by": approver.name if approver else None,
+        "note": t.note,
+        "status": t.status,
+        "created_at": t.created_at.isoformat() if t.created_at else None,
+        "resolved_at": t.resolved_at.isoformat() if t.resolved_at else None,
+    }
+
+@app.get("/api/transfers")
+def list_transfers(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    transfers = db.query(Transfer).order_by(Transfer.created_at.desc()).limit(50).all()
+    return {"transfers": [serialize_transfer(t, db) for t in transfers], "can_approve": user.role in MANAGER_ROLES}
+
+@app.post("/api/transfers")
+async def request_transfer(req: TransferRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    item = db.query(AssetItem).filter(AssetItem.id == req.asset_item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    if item.status != "allocated":
+        raise HTTPException(status_code=400, detail="Only allocated assets can be transferred")
+
+    existing = db.query(Transfer).filter(Transfer.asset_item_id == item.id, Transfer.status == "pending").first()
+    if existing:
+        raise HTTPException(status_code=409, detail="A transfer request for this asset is already pending")
+
+    to_user = db.query(User).filter(User.id == req.to_user_id, User.status == "active").first()
+    if not to_user:
+        raise HTTPException(status_code=404, detail="Target employee not found or inactive")
+    if to_user.id == item.assigned_to_user_id:
+        raise HTTPException(status_code=400, detail="Asset is already held by this employee")
+
+    holder = db.query(User).filter(User.id == item.assigned_to_user_id).first()
+    transfer = Transfer(
+        asset_item_id=item.id,
+        from_location=holder.name if holder else "",
+        to_location=to_user.name,
+        from_user_id=item.assigned_to_user_id,
+        to_user_id=to_user.id,
+        requested_by=user.id,
+        note=req.note,
+        status="pending",
+    )
+    db.add(transfer)
+    db.commit()
+    db.refresh(transfer)
+
+    log_action(db, actor=user.email, actor_role=user.role, action="TRANSFER_REQUESTED", target=item.asset_tag,
+               details=f"Requested transfer of {item.name} from {holder.name if holder else 'unknown'} to {to_user.name}.")
+    await create_notification(db, recipient_role="admin", type="transfer_requested", title="Transfer Requested",
+                              message=f"{user.name} requested transfer of {item.name} ({item.asset_tag}) to {to_user.name}. Awaiting approval.", severity="warning")
+
+    return {"transfer": serialize_transfer(transfer, db)}
+
+@app.post("/api/transfers/{transfer_id}/approve")
+async def approve_transfer(transfer_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if user.role not in MANAGER_ROLES:
+        raise HTTPException(status_code=403, detail="Only Asset Managers, Department Heads, or Admins can approve transfers")
+    transfer = db.query(Transfer).filter(Transfer.id == transfer_id).first()
+    if not transfer or transfer.status != "pending":
+        raise HTTPException(status_code=404, detail="Pending transfer not found")
+
+    item = db.query(AssetItem).filter(AssetItem.id == transfer.asset_item_id).first()
+    to_user = db.query(User).filter(User.id == transfer.to_user_id).first()
+    if not item or not to_user:
+        raise HTTPException(status_code=404, detail="Asset or target user no longer exists")
+
+    now = datetime.utcnow()
+
+    # Close current holder's history row
+    open_hist = db.query(AllocationHistory).filter(
+        AllocationHistory.asset_item_id == item.id,
+        AllocationHistory.returned_at == None,
+    ).order_by(AllocationHistory.allocated_at.desc()).first()
+    if open_hist:
+        open_hist.returned_at = now
+        open_hist.released_by = "transfer"
+
+    # Re-allocate to the new holder
+    item.status = "allocated"
+    item.assigned_to_user_id = to_user.id
+    item.overdue_flagged = False
+    db.add(AllocationHistory(asset_item_id=item.id, user_id=to_user.id, allocated_at=now, expected_return_date=item.expected_return_date))
+
+    transfer.status = "approved"
+    transfer.approved_by = user.id
+    transfer.resolved_at = now
+    db.commit()
+
+    log_action(db, actor=user.email, actor_role=user.role, action="TRANSFER_APPROVED", target=item.asset_tag,
+               details=f"Approved transfer of {item.name} to {to_user.name}. History updated.")
+    await create_notification(db, recipient_role="all", type="transfer_approved", title="Transfer Approved",
+                              message=f"{item.name} ({item.asset_tag}) has been re-allocated to {to_user.name}.", severity="success")
+
+    return {"transfer": serialize_transfer(transfer, db)}
+
+@app.post("/api/transfers/{transfer_id}/reject")
+async def reject_transfer(transfer_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if user.role not in MANAGER_ROLES:
+        raise HTTPException(status_code=403, detail="Only Asset Managers, Department Heads, or Admins can reject transfers")
+    transfer = db.query(Transfer).filter(Transfer.id == transfer_id).first()
+    if not transfer or transfer.status != "pending":
+        raise HTTPException(status_code=404, detail="Pending transfer not found")
+
+    item = db.query(AssetItem).filter(AssetItem.id == transfer.asset_item_id).first()
+    transfer.status = "rejected"
+    transfer.approved_by = user.id
+    transfer.resolved_at = datetime.utcnow()
+    db.commit()
+
+    log_action(db, actor=user.email, actor_role=user.role, action="TRANSFER_REJECTED", target=item.asset_tag if item else None,
+               details=f"Rejected transfer request for {item.name if item else 'asset'}.")
+    await create_notification(db, recipient_role="all", type="transfer_rejected", title="Transfer Rejected",
+                              message=f"Transfer request for {item.name if item else 'asset'} ({item.asset_tag if item else ''}) was rejected.", severity="warning")
+
+    return {"transfer": serialize_transfer(transfer, db)}
+
+# ---------------------------------------------------------------------------
+# Resource Booking endpoints (Screen 6)
+# ---------------------------------------------------------------------------
+
+def booking_status(b: Booking, now: datetime) -> str:
+    if b.status == "cancelled":
+        return "cancelled"
+    if b.end_time < now:
+        return "completed"
+    if b.start_time <= now <= b.end_time:
+        return "ongoing"
+    return "upcoming"
+
+def serialize_booking(b: Booking, db: Session, now: datetime = None):
+    now = now or datetime.utcnow()
+    item = db.query(AssetItem).filter(AssetItem.id == b.asset_item_id).first()
+    booker = db.query(User).filter(User.id == b.user_id).first()
+    return {
+        "id": b.id,
+        "asset_item_id": b.asset_item_id,
+        "resource_name": item.name if item else None,
+        "asset_tag": item.asset_tag if item else None,
+        "user_name": booker.name if booker else None,
+        "user_id": b.user_id,
+        "start_time": b.start_time.isoformat(),
+        "end_time": b.end_time.isoformat(),
+        "status": booking_status(b, now),
+    }
+
+@app.get("/api/resources")
+def list_resources(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    items = db.query(AssetItem).filter(AssetItem.is_bookable == True).order_by(AssetItem.name).all()
+    now = datetime.utcnow()
+    return {"resources": [serialize_asset_item(i, db, now) for i in items]}
+
+@app.get("/api/resources/{item_id}/bookings")
+def resource_bookings(item_id: int, week_start: str = None, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    query = db.query(Booking).filter(Booking.asset_item_id == item_id, Booking.status != "cancelled")
+    if week_start:
+        try:
+            start = datetime.fromisoformat(week_start)
+            query = query.filter(Booking.end_time >= start, Booking.start_time < start + timedelta(days=7))
+        except ValueError:
+            pass
+    now = datetime.utcnow()
+    return {"bookings": [serialize_booking(b, db, now) for b in query.order_by(Booking.start_time).all()]}
+
+class BookingCreateRequest(BaseModel):
+    asset_item_id: int
+    start_time: str
+    end_time: str
+
+def find_booking_conflict(db: Session, item_id: int, start: datetime, end: datetime, exclude_id: int = None):
+    """Overlap rule: existing.start < new.end AND new.start < existing.end (back-to-back is OK)."""
+    query = db.query(Booking).filter(
+        Booking.asset_item_id == item_id,
+        Booking.status == "confirmed",
+        Booking.start_time < end,
+        Booking.end_time > start,
+    )
+    if exclude_id:
+        query = query.filter(Booking.id != exclude_id)
+    return query.first()
+
+def parse_booking_times(start_time: str, end_time: str):
+    try:
+        start = datetime.fromisoformat(start_time)
+        end = datetime.fromisoformat(end_time)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid start or end time")
+    if end <= start:
+        raise HTTPException(status_code=400, detail="End time must be after start time")
+    return start, end
+
+@app.post("/api/bookings")
+async def create_booking(req: BookingCreateRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    item = db.query(AssetItem).filter(AssetItem.id == req.asset_item_id, AssetItem.is_bookable == True).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Bookable resource not found")
+
+    start, end = parse_booking_times(req.start_time, req.end_time)
+    conflict = find_booking_conflict(db, item.id, start, end)
+    if conflict:
+        holder = db.query(User).filter(User.id == conflict.user_id).first()
+        raise HTTPException(status_code=409, detail={
+            "code": "overlap",
+            "message": f"{item.name} is already booked {conflict.start_time.strftime('%H:%M')}\u2013{conflict.end_time.strftime('%H:%M')} on {conflict.start_time.strftime('%b %d')} by {holder.name if holder else 'another user'}.",
+            "conflict_start": conflict.start_time.isoformat(),
+            "conflict_end": conflict.end_time.isoformat(),
+        })
+
+    booking = Booking(asset_item_id=item.id, user_id=user.id, start_time=start, end_time=end, status="confirmed")
+    db.add(booking)
+    db.commit()
+    db.refresh(booking)
+
+    log_action(db, actor=user.email, actor_role=user.role, action="BOOKING_CREATED", target=item.asset_tag,
+               details=f"Booked {item.name} {start.strftime('%b %d %H:%M')}\u2013{end.strftime('%H:%M')}.")
+    await create_notification(db, recipient_role="all", type="booking_confirmed", title="Booking Confirmed",
+                              message=f"{item.name} ({item.asset_tag}) booked by {user.name} for {start.strftime('%b %d, %H:%M')}\u2013{end.strftime('%H:%M')}.", severity="success")
+
+    return {"booking": serialize_booking(booking, db)}
+
+@app.put("/api/bookings/{booking_id}")
+async def reschedule_booking(booking_id: int, req: BookingCreateRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    if not booking or booking.status != "confirmed":
+        raise HTTPException(status_code=404, detail="Active booking not found")
+    if booking.user_id != user.id and user.role not in MANAGER_ROLES:
+        raise HTTPException(status_code=403, detail="You can only reschedule your own bookings")
+
+    item = db.query(AssetItem).filter(AssetItem.id == booking.asset_item_id).first()
+    start, end = parse_booking_times(req.start_time, req.end_time)
+    conflict = find_booking_conflict(db, booking.asset_item_id, start, end, exclude_id=booking.id)
+    if conflict:
+        holder = db.query(User).filter(User.id == conflict.user_id).first()
+        raise HTTPException(status_code=409, detail={
+            "code": "overlap",
+            "message": f"{item.name if item else 'Resource'} is already booked {conflict.start_time.strftime('%H:%M')}\u2013{conflict.end_time.strftime('%H:%M')} on {conflict.start_time.strftime('%b %d')} by {holder.name if holder else 'another user'}.",
+        })
+
+    booking.start_time = start
+    booking.end_time = end
+    booking.reminder_sent = False
+    db.commit()
+
+    log_action(db, actor=user.email, actor_role=user.role, action="BOOKING_RESCHEDULED", target=item.asset_tag if item else None,
+               details=f"Rescheduled {item.name if item else 'booking'} to {start.strftime('%b %d %H:%M')}\u2013{end.strftime('%H:%M')}.")
+
+    return {"booking": serialize_booking(booking, db)}
+
+@app.post("/api/bookings/{booking_id}/cancel")
+async def cancel_booking(booking_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    if not booking or booking.status != "confirmed":
+        raise HTTPException(status_code=404, detail="Active booking not found")
+    if booking.user_id != user.id and user.role not in MANAGER_ROLES:
+        raise HTTPException(status_code=403, detail="You can only cancel your own bookings")
+
+    item = db.query(AssetItem).filter(AssetItem.id == booking.asset_item_id).first()
+    booking.status = "cancelled"
+    db.commit()
+
+    log_action(db, actor=user.email, actor_role=user.role, action="BOOKING_CANCELLED", target=item.asset_tag if item else None,
+               details=f"Cancelled booking for {item.name if item else 'resource'} ({booking.start_time.strftime('%b %d %H:%M')}).")
+    await create_notification(db, recipient_role="all", type="booking_cancelled", title="Booking Cancelled",
+                              message=f"Booking for {item.name if item else 'resource'} on {booking.start_time.strftime('%b %d, %H:%M')} was cancelled by {user.name}.", severity="warning")
+
+    return {"booking": serialize_booking(booking, db)}
+
+@app.get("/api/my-bookings")
+def my_bookings(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    bookings = db.query(Booking).filter(Booking.user_id == user.id).order_by(Booking.start_time.desc()).limit(50).all()
+    now = datetime.utcnow()
+    return {"bookings": [serialize_booking(b, db, now) for b in bookings]}
+
+# ---------------------------------------------------------------------------
+# Background loop: overdue auto-flag + booking reminders
+# ---------------------------------------------------------------------------
+
+async def activity_monitor_loop():
+    while True:
+        try:
+            db = SessionLocal()
+            try:
+                now = datetime.utcnow()
+
+                # Auto-flag overdue allocations (notify once per allocation)
+                overdue_items = db.query(AssetItem).filter(
+                    AssetItem.status == "allocated",
+                    AssetItem.expected_return_date != None,
+                    AssetItem.expected_return_date < now,
+                    AssetItem.overdue_flagged == False,
+                ).all()
+                for item in overdue_items:
+                    holder = db.query(User).filter(User.id == item.assigned_to_user_id).first()
+                    days = (now - item.expected_return_date).days
+                    item.overdue_flagged = True
+                    db.commit()
+                    log_action(db, actor="system", actor_role="system", action="OVERDUE_FLAGGED", target=item.asset_tag,
+                               details=f"{item.name} overdue by {max(days, 1)} day(s) ({holder.name if holder else 'unknown'}).")
+                    await create_notification(db, recipient_role="admin", type="overdue_return", title="Overdue Return Alert",
+                                              message=f"{item.name} ({item.asset_tag}) checked out to {holder.name if holder else 'unknown'} is {max(days, 1)} day(s) overdue for return.", severity="danger")
+
+                # Booking reminders (30 min before start)
+                upcoming = db.query(Booking).filter(
+                    Booking.status == "confirmed",
+                    Booking.reminder_sent == False,
+                    Booking.start_time > now,
+                    Booking.start_time <= now + timedelta(minutes=30),
+                ).all()
+                for b in upcoming:
+                    item = db.query(AssetItem).filter(AssetItem.id == b.asset_item_id).first()
+                    booker = db.query(User).filter(User.id == b.user_id).first()
+                    b.reminder_sent = True
+                    db.commit()
+                    minutes = max(int((b.start_time - now).total_seconds() // 60), 1)
+                    await create_notification(db, recipient_role="all", type="booking_reminder", title="Booking Reminder",
+                                              message=f"Reminder: {item.name if item else 'Resource'} booking starts in {minutes} min ({booker.name if booker else 'unknown'}).", severity="info")
+            finally:
+                db.close()
+        except Exception as e:
+            print(f"activity_monitor_loop error: {e}")
+        await asyncio.sleep(60)
+
+@app.on_event("startup")
+async def start_background_tasks():
+    asyncio.create_task(activity_monitor_loop())
 
 if __name__ == "__main__":
     import uvicorn

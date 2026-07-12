@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Activity, MessageSquare, LogOut, Shield, Wrench, BellRing, LayoutGrid, Building2 } from 'lucide-react';
+import { Activity, MessageSquare, LogOut, Shield, Wrench, BellRing, LayoutGrid, Building2, Package, CalendarDays } from 'lucide-react';
 import NotificationBell from './NotificationBell';
 
 const ROLE_LABELS = {
@@ -72,6 +72,16 @@ const Layout = ({ children, user, onLogout }) => {
                   <LayoutGrid size={18} className="flex-shrink-0" />
                   <span className="hidden sm:inline">Dashboard</span>
                   <span className="sm:hidden">Home</span>
+                </Link>
+                <Link to="/allocations" className={linkClass(location.pathname === '/allocations')}>
+                  <Package size={18} className="flex-shrink-0" />
+                  <span className="hidden sm:inline">Allocations</span>
+                  <span className="sm:hidden">Alloc</span>
+                </Link>
+                <Link to="/bookings" className={linkClass(location.pathname === '/bookings')}>
+                  <CalendarDays size={18} className="flex-shrink-0" />
+                  <span className="hidden sm:inline">Bookings</span>
+                  <span className="sm:hidden">Book</span>
                 </Link>
                 {isAdmin && (
                   <>

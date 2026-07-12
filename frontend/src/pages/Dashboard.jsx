@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   PackageCheck, PackageOpen, Wrench, CalendarClock, ArrowLeftRight,
@@ -24,6 +25,7 @@ const ROLE_LABELS = {
 };
 
 const Dashboard = ({ user }) => {
+  const navigate = useNavigate();
   const [summary, setSummary] = useState(null);
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
@@ -79,7 +81,7 @@ const Dashboard = ({ user }) => {
           <button onClick={() => quickAction('Register Asset')} className="btn-bauhaus bg-primary text-white px-3 py-2 text-xs font-bold uppercase tracking-wide flex items-center gap-1.5">
             <Plus size={15} /> Register Asset
           </button>
-          <button onClick={() => quickAction('Book Resource')} className="btn-bauhaus bg-accentYellow text-ink px-3 py-2 text-xs font-bold uppercase tracking-wide flex items-center gap-1.5">
+          <button onClick={() => navigate('/bookings')} className="btn-bauhaus bg-accentYellow text-ink px-3 py-2 text-xs font-bold uppercase tracking-wide flex items-center gap-1.5">
             <CalendarPlus size={15} /> Book Resource
           </button>
           <button onClick={() => quickAction('Raise Maintenance Request')} className="btn-bauhaus bg-danger text-white px-3 py-2 text-xs font-bold uppercase tracking-wide flex items-center gap-1.5">

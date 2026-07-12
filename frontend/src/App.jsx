@@ -8,6 +8,8 @@ import Login from './pages/Login';
 import TechnicianDashboard from './pages/TechnicianDashboard';
 import ActivityLog from './pages/ActivityLog';
 import Organization from './pages/Organization';
+import Allocations from './pages/Allocations';
+import Bookings from './pages/Bookings';
 
 const API = 'http://localhost:8001';
 
@@ -84,6 +86,8 @@ function App() {
           ) : (
             <>
               <Route path="/" element={<Dashboard user={user} />} />
+              <Route path="/allocations" element={<Allocations user={user} />} />
+              <Route path="/bookings" element={<Bookings user={user} />} />
               {isAdmin && <Route path="/fleet" element={<Fleet />} />}
               {isAdmin && <Route path="/chat" element={<Chatbot />} />}
               {isAdmin && <Route path="/activity" element={<ActivityLog />} />}

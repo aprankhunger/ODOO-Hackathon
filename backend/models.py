@@ -112,6 +112,8 @@ class AssetItem(Base):
     status = Column(String, default="available")  # available | allocated | maintenance | in_transfer
     assigned_to_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     expected_return_date = Column(DateTime, nullable=True)
+    is_bookable = Column(Boolean, default=False)  # shared resources (rooms, projectors)
+    overdue_flagged = Column(Boolean, default=False)  # overdue notification sent once
     created_at = Column(DateTime, default=datetime.utcnow)
 
     category = relationship("AssetCategory")
@@ -126,6 +128,7 @@ class Booking(Base):
     start_time = Column(DateTime, nullable=False)
     end_time = Column(DateTime, nullable=False)
     status = Column(String, default="confirmed")  # confirmed | cancelled | completed
+    reminder_sent = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     asset_item = relationship("AssetItem")
@@ -140,6 +143,27 @@ class Transfer(Base):
     to_location = Column(String, nullable=False)
     status = Column(String, default="pending")  # pending | approved | rejected
     requested_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    from_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    to_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    note = Column(String, nullable=True)
+    resolved_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     asset_item = relationship("AssetItem")
+
+class AllocationHistory(Base):
+    __tablename__ = "allocation_history"
+
+    id = Column(Integer, primary_key=True, index=True)
+    asset_item_id = Column(Integer, ForeignKey("asset_items.id"), index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    allocated_at = Column(DateTime, default=datetime.utcnow)
+    returned_at = Column(DateTime, nullable=True)
+    expected_return_date = Column(DateTime, nullable=True)
+    condition_notes = Column(String, nullable=True)
+    released_by = Column(String, nullable=True)  # "return" | "transfer" | actor email
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    asset_item = relationship("AssetItem")
+    user = relationship("User")
