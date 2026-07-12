@@ -8,7 +8,15 @@ import platform
 import json
 import requests
 import websockets
+import sys
+import logging
 from datetime import datetime
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
 
 # Windows-specific libraries: import conditionally so the agent
 # also runs on macOS and Linux without crashing.
@@ -61,8 +69,14 @@ def login():
 
     while True:
         if not email:
+            if not sys.stdin.isatty():
+                logging.error("INTELLIASSET_EMAIL environment variable is required in non-interactive mode.")
+                sys.exit(1)
             email = input("IntelliAsset email: ").strip()
         if not password:
+            if not sys.stdin.isatty():
+                logging.error("INTELLIASSET_PASSWORD environment variable is required in non-interactive mode.")
+                sys.exit(1)
             password = getpass.getpass("IntelliAsset password: ")
         try:
             res = requests.post(
@@ -71,7 +85,7 @@ def login():
                 timeout=15,
             )
         except Exception as e:
-            print(f"Could not reach backend at {CENTRAL_BACKEND_URL}: {e}")
+            logging.warning(f"Could not reach backend at {CENTRAL_BACKEND_URL}: {e}. Retrying in 5s...")
             time.sleep(5)
             continue
 
@@ -79,38 +93,45 @@ def login():
             data = res.json()
             AUTH_TOKEN = data["token"]
             user = data.get("user", {})
-            print(f"Signed in as {user.get('name')} ({user.get('role')}). This device will be enrolled under your account.")
+            logging.info(f"Signed in as {user.get('name')} ({user.get('role')}). This device will be enrolled under your account.")
             return
         else:
             try:
                 detail = res.json().get("detail", "Login failed")
             except Exception:
                 detail = "Login failed"
-            print(f"Login failed: {detail}")
+            logging.error(f"Login failed: {detail}")
+            if not sys.stdin.isatty():
+                logging.error("Fatal: Invalid credentials provided in environment variables.")
+                sys.exit(1)
             email = None
             password = None
 
 def register_asset():
-    try:
-        payload = {
-            "device_id": DEVICE_ID,
-            "hostname": platform.node(),
-            "os_name": f"{platform.system()} {platform.release()}"
-        }
-        res = requests.post(
-            f"{CENTRAL_BACKEND_URL}/api/assets/register",
-            json=payload,
-            headers={"Authorization": f"Bearer {AUTH_TOKEN}"},
-            timeout=15,
-        )
-        data = res.json()
-        if res.status_code == 200:
-            tag = data.get("asset_tag")
-            print(f"Enrollment: {data.get('message')}" + (f" — asset tag {tag}" if tag else ""))
-        else:
-            print(f"Enrollment failed: {data.get('detail', data)}")
-    except Exception as e:
-        print(f"Failed to register asset: {e}")
+    while True:
+        try:
+            payload = {
+                "device_id": DEVICE_ID,
+                "hostname": platform.node(),
+                "os_name": f"{platform.system()} {platform.release()}"
+            }
+            res = requests.post(
+                f"{CENTRAL_BACKEND_URL}/api/assets/register",
+                json=payload,
+                headers={"Authorization": f"Bearer {AUTH_TOKEN}"},
+                timeout=15,
+            )
+            data = res.json()
+            if res.status_code == 200:
+                tag = data.get("asset_tag")
+                logging.info(f"Enrollment: {data.get('message')}" + (f" — asset tag {tag}" if tag else ""))
+                return
+            else:
+                logging.error(f"Enrollment failed: {data.get('detail', data)}. Retrying in 10s...")
+        except Exception as e:
+            logging.error(f"Failed to register asset: {e}. Retrying in 10s...")
+        
+        time.sleep(10)
 
 def get_installed_software():
     if not IS_WINDOWS:
@@ -142,7 +163,7 @@ def get_installed_software():
             except EnvironmentError:
                 continue
     except Exception as e:
-        print(f"Error getting software: {e}")
+        logging.warning(f"Error getting software: {e}")
     return software[:20]
 
 def get_wmi_metrics():
@@ -277,19 +298,19 @@ async def stream_telemetry():
     uri = f"{CENTRAL_WS_URL}/ws/ingest/{DEVICE_ID}"
     while True:
         try:
-            print(f"Connecting to Central Backend at {uri}...")
+            logging.info(f"Connecting to Central Backend at {uri}...")
             async with websockets.connect(uri) as websocket:
-                print("Connected! Streaming telemetry...")
+                logging.info("Connected! Streaming telemetry...")
                 while True:
                     data = get_fast_metrics()
                     await websocket.send(json.dumps(data))
                     await asyncio.sleep(2)
         except Exception as e:
-            print(f"Connection lost, retrying in 5s... ({e})")
+            logging.warning(f"Connection lost, retrying in 5s... ({e})")
             await asyncio.sleep(5)
 
 async def main():
-    print(f"Starting IntelliAsset Agent (Device ID: {DEVICE_ID})")
+    logging.info(f"Starting IntelliAsset Agent (Device ID: {DEVICE_ID})")
     # Sign in with an IntelliAsset account, then enroll this device
     await asyncio.to_thread(login)
     register_asset()
