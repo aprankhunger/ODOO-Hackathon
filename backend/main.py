@@ -177,7 +177,7 @@ def assign_technician(req: AssignRequest, db: Session = Depends(get_db)):
             """
             
             response = gemini_client.models.generate_content(
-                model='gemini-2.5-flash',
+                model='gemini-flash-latest',
                 contents=prompt
             )
             ai_report = response.text
@@ -239,6 +239,7 @@ def chat(req: ChatRequest, db: Session = Depends(get_db)):
     Answer the user's question using the live fleet data below.
     Be concise, actionable, and reference specific devices by hostname when relevant.
     If the fleet data is empty, say that no devices are currently registered and answer generally.
+    Respond in plain text only. Do not use markdown formatting such as ** or bullets with *.
 
     Fleet data:
     {json.dumps(fleet_context, indent=2)}
@@ -248,7 +249,7 @@ def chat(req: ChatRequest, db: Session = Depends(get_db)):
 
     try:
         response = gemini_client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-flash-latest',
             contents=prompt
         )
         return {"reply": response.text}
