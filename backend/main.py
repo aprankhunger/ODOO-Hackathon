@@ -3,14 +3,19 @@ import os
 import random
 import string
 import json
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException
+import hashlib
+import secrets
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
 from database import engine, get_db, SessionLocal
-from models import Asset, Telemetry, TechnicianCode, Notification, AuditLog, Base
+from models import (
+    Asset, Telemetry, TechnicianCode, Notification, AuditLog,
+    User, Department, AssetCategory, AssetItem, Booking, Transfer, Base,
+)
 from pydantic import BaseModel
 
 try:
@@ -138,6 +143,162 @@ def seed_activity_data():
         db.close()
 
 seed_activity_data()
+
+# ---------------------------------------------------------------------------
+# Auth helpers
+# ---------------------------------------------------------------------------
+
+def hash_password(password: str, salt: str = None) -> str:
+    if salt is None:
+        salt = secrets.token_hex(8)
+    digest = hashlib.sha256((salt + password).encode()).hexdigest()
+    return f"{salt}${digest}"
+
+def verify_password(password: str, stored: str) -> bool:
+    try:
+        salt, _ = stored.split("$", 1)
+    except ValueError:
+        return False
+    return secrets.compare_digest(hash_password(password, salt), stored)
+
+def serialize_user(u: User):
+    return {
+        "id": u.id,
+        "name": u.name,
+        "email": u.email,
+        "role": u.role,
+        "department_id": u.department_id,
+        "status": u.status,
+        "created_at": u.created_at.isoformat() if u.created_at else None,
+    }
+
+def get_current_user(authorization: str = Header(None), db: Session = Depends(get_db)) -> User:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    token = authorization.split(" ", 1)[1].strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    user = db.query(User).filter(User.session_token == token).first()
+    if not user or user.status != "active":
+        raise HTTPException(status_code=401, detail="Session invalid or expired")
+    return user
+
+def require_admin(user: User = Depends(get_current_user)) -> User:
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user
+
+def seed_org_data():
+    """Seed admin user, departments, categories, asset items, bookings, transfers."""
+    db = SessionLocal()
+    try:
+        if db.query(User).first() is not None:
+            return
+
+        now = datetime.utcnow()
+
+        # Departments (Engineering has a child: Platform)
+        depts = {}
+        for name, parent in [("Engineering", None), ("Platform", "Engineering"), ("Operations", None), ("Finance", None), ("Marketing", None)]:
+            d = Department(name=name, parent_id=depts[parent].id if parent else None, status="active")
+            db.add(d)
+            db.commit()
+            db.refresh(d)
+            depts[name] = d
+
+        # Users
+        def add_user(name, email, password, role, dept):
+            u = User(
+                name=name, email=email,
+                password_hash=hash_password(password),
+                role=role,
+                department_id=depts[dept].id if dept else None,
+                status="active",
+            )
+            db.add(u)
+            db.commit()
+            db.refresh(u)
+            return u
+
+        admin = add_user("System Admin", "admin@intelliasset.com", "admin123", "admin", None)
+        priya = add_user("Priya Sharma", "priya.sharma@intelliasset.com", "demo1234", "department_head", "Engineering")
+        raj = add_user("Raj Patel", "raj.patel@intelliasset.com", "demo1234", "asset_manager", "Operations")
+        ananya = add_user("Ananya Iyer", "ananya.iyer@intelliasset.com", "demo1234", "employee", "Engineering")
+        vikram = add_user("Vikram Rao", "vikram.rao@intelliasset.com", "demo1234", "employee", "Marketing")
+        karan = add_user("Karan Mehta", "karan.mehta@intelliasset.com", "demo1234", "employee", "Finance")
+        sneha = add_user("Sneha Kulkarni", "sneha.kulkarni@intelliasset.com", "demo1234", "department_head", "Operations")
+        arjun = add_user("Arjun Nair", "arjun.nair@intelliasset.com", "demo1234", "employee", "Platform")
+        meera = add_user("Meera Desai", "meera.desai@intelliasset.com", "demo1234", "employee", "Engineering")
+
+        depts["Engineering"].head_user_id = priya.id
+        depts["Operations"].head_user_id = sneha.id
+        db.commit()
+
+        # Categories
+        cats = {}
+        for name, desc, fields in [
+            ("Electronics", "Laptops, monitors, peripherals", ["Warranty Period", "Serial Number"]),
+            ("Furniture", "Desks, chairs, storage", ["Material"]),
+            ("Vehicles", "Company cars and bikes", ["Registration No", "Insurance Expiry"]),
+            ("AV Equipment", "Projectors, cameras, audio gear", ["Warranty Period"]),
+            ("Software Licenses", "Seats and subscriptions", ["License Key", "Renewal Date"]),
+        ]:
+            c = AssetCategory(name=name, description=desc, custom_fields=fields, status="active")
+            db.add(c)
+            db.commit()
+            db.refresh(c)
+            cats[name] = c
+
+        # Asset items
+        def add_item(tag, name, cat, dept, status, assigned=None, ret_days=None):
+            item = AssetItem(
+                asset_tag=tag, name=name,
+                category_id=cats[cat].id,
+                department_id=depts[dept].id if dept else None,
+                status=status,
+                assigned_to_user_id=assigned.id if assigned else None,
+                expected_return_date=(now + timedelta(days=ret_days)) if ret_days is not None else None,
+            )
+            db.add(item)
+            return item
+
+        items = [
+            add_item("AF-0114", 'MacBook Pro 16"', "Electronics", "Engineering", "allocated", priya, 21),
+            add_item("AF-0087", "Dell Latitude 7440", "Electronics", "Engineering", "maintenance"),
+            add_item("AF-0102", "HP EliteBook 840", "Electronics", "Platform", "available"),
+            add_item("AF-0156", 'iPad Pro 12.9"', "Electronics", "Finance", "allocated", karan, -3),   # overdue
+            add_item("AF-0075", "Lenovo ThinkPad X1", "Electronics", "Operations", "in_transfer"),
+            add_item("AF-0230", "Conference Projector", "AV Equipment", "Operations", "available"),
+            add_item("AF-0198", "Canon DSLR Kit", "AV Equipment", "Marketing", "allocated", vikram, -1),  # overdue
+            add_item("AF-0301", "Logitech MX Master", "Electronics", "Engineering", "allocated", meera, 4),
+            add_item("AF-0310", "Standing Desk", "Furniture", "Engineering", "available"),
+            add_item("AF-0311", "Ergonomic Chair", "Furniture", "Operations", "available"),
+            add_item("AF-0402", "Company Van", "Vehicles", "Operations", "allocated", sneha, 2),
+            add_item("AF-0510", "Figma Org Seat", "Software Licenses", "Engineering", "allocated", arjun, 30),
+            add_item("AF-0231", "Portable PA System", "AV Equipment", "Marketing", "available"),
+            add_item("AF-0103", 'Samsung Monitor 32"', "Electronics", "Platform", "available"),
+            add_item("AF-0088", "MacBook Air 13", "Electronics", "Marketing", "maintenance"),
+        ]
+        db.commit()
+        for it in items:
+            db.refresh(it)
+
+        # Bookings (active now + future)
+        db.add(Booking(asset_item_id=items[5].id, user_id=ananya.id, start_time=now - timedelta(hours=1), end_time=now + timedelta(hours=2), status="confirmed"))
+        db.add(Booking(asset_item_id=items[12].id, user_id=vikram.id, start_time=now + timedelta(days=1), end_time=now + timedelta(days=1, hours=4), status="confirmed"))
+        db.add(Booking(asset_item_id=items[5].id, user_id=meera.id, start_time=now + timedelta(days=2), end_time=now + timedelta(days=2, hours=3), status="confirmed"))
+        db.add(Booking(asset_item_id=items[6].id, user_id=vikram.id, start_time=now - timedelta(days=2), end_time=now - timedelta(days=1), status="cancelled"))
+
+        # Transfers
+        db.add(Transfer(asset_item_id=items[4].id, from_location="Mumbai HQ", to_location="Bengaluru Office", status="pending", requested_by=sneha.id))
+        db.add(Transfer(asset_item_id=items[13].id, from_location="Bengaluru Office", to_location="Pune Office", status="pending", requested_by=arjun.id))
+
+        db.commit()
+        print("Seeded org data: users, departments, categories, assets, bookings, transfers.")
+    finally:
+        db.close()
+
+seed_org_data()
 
 class AssignRequest(BaseModel):
     device_id: str
@@ -523,6 +684,324 @@ def get_audit_logs(actor: str = None, action: str = None, limit: int = 100, db: 
             for l in logs
         ],
         "action_types": sorted(action_types),
+    }
+
+# ---------------------------------------------------------------------------
+# Auth endpoints
+# ---------------------------------------------------------------------------
+
+class SignupRequest(BaseModel):
+    name: str
+    email: str
+    password: str
+
+class EmailLoginRequest(BaseModel):
+    email: str
+    password: str
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+class ResetPasswordRequest(BaseModel):
+    email: str
+    code: str
+    new_password: str
+
+@app.post("/api/auth/signup")
+def signup(req: SignupRequest, db: Session = Depends(get_db)):
+    email = req.email.strip().lower()
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="A valid email is required")
+    if len(req.password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    if db.query(User).filter(User.email == email).first():
+        raise HTTPException(status_code=409, detail="An account with this email already exists")
+
+    # Signup ALWAYS creates an Employee account — roles are assigned only by Admin
+    user = User(
+        name=req.name.strip() or email.split("@")[0],
+        email=email,
+        password_hash=hash_password(req.password),
+        role="employee",
+        status="active",
+        session_token=secrets.token_hex(24),
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    log_action(db, actor=email, actor_role="employee", action="SIGNUP", target=None, details=f"{user.name} created an Employee account.")
+    return {"token": user.session_token, "user": serialize_user(user)}
+
+@app.post("/api/auth/login")
+def email_login(req: EmailLoginRequest, db: Session = Depends(get_db)):
+    email = req.email.strip().lower()
+    user = db.query(User).filter(User.email == email).first()
+    if not user or not verify_password(req.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    if user.status != "active":
+        raise HTTPException(status_code=403, detail="This account has been deactivated")
+
+    user.session_token = secrets.token_hex(24)
+    db.commit()
+
+    log_action(db, actor=email, actor_role=user.role, action="LOGIN", target=None, details=f"{user.name} signed in.")
+    return {"token": user.session_token, "user": serialize_user(user)}
+
+@app.get("/api/auth/me")
+def auth_me(user: User = Depends(get_current_user)):
+    return {"user": serialize_user(user)}
+
+@app.post("/api/auth/logout")
+def logout(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    user.session_token = None
+    db.commit()
+    log_action(db, actor=user.email, actor_role=user.role, action="LOGOUT", target=None, details=f"{user.name} signed out.")
+    return {"message": "Logged out"}
+
+@app.post("/api/auth/forgot-password")
+def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    email = req.email.strip().lower()
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="No account found with this email")
+    user.reset_code = "".join(random.choices(string.digits, k=6))
+    db.commit()
+    log_action(db, actor=email, actor_role=user.role, action="PASSWORD_RESET_REQUESTED", target=None, details="Requested a password reset code.")
+    # Demo: return the code directly (no email service configured)
+    return {"message": "Reset code generated", "demo_reset_code": user.reset_code}
+
+@app.post("/api/auth/reset-password")
+def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
+    email = req.email.strip().lower()
+    user = db.query(User).filter(User.email == email).first()
+    if not user or not user.reset_code or user.reset_code != req.code.strip():
+        raise HTTPException(status_code=400, detail="Invalid reset code")
+    if len(req.new_password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    user.password_hash = hash_password(req.new_password)
+    user.reset_code = None
+    user.session_token = None
+    db.commit()
+    log_action(db, actor=email, actor_role=user.role, action="PASSWORD_RESET", target=None, details="Password was reset via reset code.")
+    return {"message": "Password reset successfully. Please sign in."}
+
+# ---------------------------------------------------------------------------
+# Organization setup endpoints (admin only)
+# ---------------------------------------------------------------------------
+
+def serialize_department(d: Department, db: Session):
+    head = db.query(User).filter(User.id == d.head_user_id).first() if d.head_user_id else None
+    parent = db.query(Department).filter(Department.id == d.parent_id).first() if d.parent_id else None
+    return {
+        "id": d.id,
+        "name": d.name,
+        "head_user_id": d.head_user_id,
+        "head_name": head.name if head else None,
+        "parent_id": d.parent_id,
+        "parent_name": parent.name if parent else None,
+        "status": d.status,
+    }
+
+@app.get("/api/departments")
+def list_departments(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    depts = db.query(Department).order_by(Department.name).all()
+    return {"departments": [serialize_department(d, db) for d in depts]}
+
+class DepartmentRequest(BaseModel):
+    name: str
+    head_user_id: int | None = None
+    parent_id: int | None = None
+    status: str = "active"
+
+@app.post("/api/departments")
+def create_department(req: DepartmentRequest, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    dept = Department(name=req.name.strip(), head_user_id=req.head_user_id, parent_id=req.parent_id, status=req.status)
+    db.add(dept)
+    db.commit()
+    db.refresh(dept)
+    log_action(db, actor=admin.email, actor_role="admin", action="DEPARTMENT_CREATED", target=dept.name, details=f"Created department {dept.name}.")
+    return {"department": serialize_department(dept, db)}
+
+@app.put("/api/departments/{dept_id}")
+def update_department(dept_id: int, req: DepartmentRequest, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    dept = db.query(Department).filter(Department.id == dept_id).first()
+    if not dept:
+        raise HTTPException(status_code=404, detail="Department not found")
+    if req.parent_id == dept.id:
+        raise HTTPException(status_code=400, detail="A department cannot be its own parent")
+    dept.name = req.name.strip()
+    dept.head_user_id = req.head_user_id
+    dept.parent_id = req.parent_id
+    dept.status = req.status
+    db.commit()
+    log_action(db, actor=admin.email, actor_role="admin", action="DEPARTMENT_UPDATED", target=dept.name, details=f"Updated department {dept.name} (status: {dept.status}).")
+    return {"department": serialize_department(dept, db)}
+
+def serialize_category(c: AssetCategory):
+    return {
+        "id": c.id,
+        "name": c.name,
+        "description": c.description,
+        "custom_fields": c.custom_fields or [],
+        "status": c.status,
+    }
+
+@app.get("/api/categories")
+def list_categories(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    cats = db.query(AssetCategory).order_by(AssetCategory.name).all()
+    return {"categories": [serialize_category(c) for c in cats]}
+
+class CategoryRequest(BaseModel):
+    name: str
+    description: str | None = None
+    custom_fields: list[str] = []
+    status: str = "active"
+
+@app.post("/api/categories")
+def create_category(req: CategoryRequest, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    cat = AssetCategory(name=req.name.strip(), description=req.description, custom_fields=req.custom_fields, status=req.status)
+    db.add(cat)
+    db.commit()
+    db.refresh(cat)
+    log_action(db, actor=admin.email, actor_role="admin", action="CATEGORY_CREATED", target=cat.name, details=f"Created asset category {cat.name}.")
+    return {"category": serialize_category(cat)}
+
+@app.put("/api/categories/{cat_id}")
+def update_category(cat_id: int, req: CategoryRequest, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    cat = db.query(AssetCategory).filter(AssetCategory.id == cat_id).first()
+    if not cat:
+        raise HTTPException(status_code=404, detail="Category not found")
+    cat.name = req.name.strip()
+    cat.description = req.description
+    cat.custom_fields = req.custom_fields
+    cat.status = req.status
+    db.commit()
+    log_action(db, actor=admin.email, actor_role="admin", action="CATEGORY_UPDATED", target=cat.name, details=f"Updated asset category {cat.name}.")
+    return {"category": serialize_category(cat)}
+
+ROLE_LABELS = {
+    "admin": "Admin",
+    "department_head": "Department Head",
+    "asset_manager": "Asset Manager",
+    "employee": "Employee",
+}
+
+@app.get("/api/users")
+def list_users(admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    users = db.query(User).order_by(User.name).all()
+    result = []
+    for u in users:
+        data = serialize_user(u)
+        dept = db.query(Department).filter(Department.id == u.department_id).first() if u.department_id else None
+        data["department_name"] = dept.name if dept else None
+        result.append(data)
+    return {"users": result}
+
+class UserUpdateRequest(BaseModel):
+    role: str | None = None
+    department_id: int | None = None
+    status: str | None = None
+
+@app.put("/api/users/{user_id}")
+async def update_user(user_id: int, req: UserUpdateRequest, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target.role == "admin" and target.id != admin.id:
+        raise HTTPException(status_code=403, detail="Cannot modify another admin account")
+    if target.id == admin.id and req.role and req.role != "admin":
+        raise HTTPException(status_code=400, detail="You cannot demote your own admin account")
+
+    changes = []
+    if req.role and req.role != target.role:
+        if req.role not in ("employee", "department_head", "asset_manager"):
+            raise HTTPException(status_code=400, detail="Invalid role")
+        old_role = target.role
+        target.role = req.role
+        changes.append(f"role: {ROLE_LABELS.get(old_role, old_role)} → {ROLE_LABELS.get(req.role, req.role)}")
+    if req.department_id is not None:
+        target.department_id = req.department_id or None
+        changes.append("department updated")
+    if req.status and req.status != target.status:
+        target.status = req.status
+        if req.status == "inactive":
+            target.session_token = None  # kill sessions of deactivated users
+        changes.append(f"status: {req.status}")
+
+    db.commit()
+
+    if changes:
+        detail = f"{target.name}: " + ", ".join(changes)
+        log_action(db, actor=admin.email, actor_role="admin", action="USER_UPDATED", target=target.email, details=detail)
+        if req.role:
+            await create_notification(
+                db,
+                recipient_role="all",
+                type="role_changed",
+                title="Role Updated",
+                message=f"{target.name} is now {ROLE_LABELS.get(target.role, target.role)}.",
+                severity="info",
+            )
+
+    data = serialize_user(target)
+    dept = db.query(Department).filter(Department.id == target.department_id).first() if target.department_id else None
+    data["department_name"] = dept.name if dept else None
+    return {"user": data}
+
+# ---------------------------------------------------------------------------
+# Dashboard summary endpoint
+# ---------------------------------------------------------------------------
+
+@app.get("/api/dashboard/summary")
+def dashboard_summary(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    now = datetime.utcnow()
+    week_out = now + timedelta(days=7)
+
+    available = db.query(AssetItem).filter(AssetItem.status == "available").count()
+    allocated = db.query(AssetItem).filter(AssetItem.status == "allocated").count()
+    maintenance_today = db.query(AssetItem).filter(AssetItem.status == "maintenance").count()
+    active_bookings = db.query(Booking).filter(
+        Booking.status == "confirmed",
+        Booking.end_time >= now,
+    ).count()
+    pending_transfers = db.query(Transfer).filter(Transfer.status == "pending").count()
+
+    def serialize_item(item: AssetItem):
+        assignee = db.query(User).filter(User.id == item.assigned_to_user_id).first() if item.assigned_to_user_id else None
+        return {
+            "id": item.id,
+            "asset_tag": item.asset_tag,
+            "name": item.name,
+            "assigned_to": assignee.name if assignee else None,
+            "expected_return_date": item.expected_return_date.isoformat() if item.expected_return_date else None,
+            "days_delta": (item.expected_return_date - now).days if item.expected_return_date else None,
+        }
+
+    overdue_items = db.query(AssetItem).filter(
+        AssetItem.status == "allocated",
+        AssetItem.expected_return_date != None,
+        AssetItem.expected_return_date < now,
+    ).order_by(AssetItem.expected_return_date).all()
+
+    upcoming_items = db.query(AssetItem).filter(
+        AssetItem.status == "allocated",
+        AssetItem.expected_return_date != None,
+        AssetItem.expected_return_date >= now,
+        AssetItem.expected_return_date <= week_out,
+    ).order_by(AssetItem.expected_return_date).all()
+
+    return {
+        "kpis": {
+            "assets_available": available,
+            "assets_allocated": allocated,
+            "maintenance_today": maintenance_today,
+            "active_bookings": active_bookings,
+            "pending_transfers": pending_transfers,
+            "upcoming_returns": len(upcoming_items),
+        },
+        "overdue_returns": [serialize_item(i) for i in overdue_items],
+        "upcoming_returns": [serialize_item(i) for i in upcoming_items],
     }
 
 if __name__ == "__main__":

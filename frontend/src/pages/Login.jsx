@@ -1,30 +1,120 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Shield, Wrench, ArrowRight, Lock } from 'lucide-react';
+import { Shield, Wrench, ArrowRight, Lock, UserPlus, KeyRound } from 'lucide-react';
+
+const API = 'http://localhost:8001';
+
+const inputClass =
+  'w-full bg-surface border-2 border-ink px-4 py-3 text-ink placeholder:text-muted focus:outline-none focus:shadow-bauhaus-sm transition-shadow';
+const labelClass = 'block text-xs font-bold uppercase tracking-widest text-ink mb-1.5';
 
 const Login = ({ onLogin }) => {
-  const [activeTab, setActiveTab] = useState('admin');
-  const [adminUser, setAdminUser] = useState('');
-  const [adminPass, setAdminPass] = useState('');
-  const [techCode, setTechCode] = useState('');
+  const [activeTab, setActiveTab] = useState('signin'); // signin | signup | technician
+  const [mode, setMode] = useState('form'); // form | forgot | reset
   const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const handleAdminLogin = (e) => {
+  // Sign in / sign up fields
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
+
+  // Forgot / reset fields
+  const [resetCode, setResetCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [demoCode, setDemoCode] = useState('');
+
+  // Technician
+  const [techCode, setTechCode] = useState('');
+
+  const clearMessages = () => { setError(''); setInfo(''); };
+
+  const post = async (path, body) => {
+    const res = await fetch(`${API}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || 'Something went wrong');
+    return data;
+  };
+
+  const handleSignIn = async (e) => {
     e.preventDefault();
-    if (adminUser === 'admin' && adminPass === 'admin') {
-      onLogin({ role: 'admin' });
-    } else {
-      setError('Invalid admin credentials. Use admin/admin');
+    clearMessages();
+    setLoading(true);
+    try {
+      const data = await post('/api/auth/login', { email, password });
+      localStorage.setItem('ia_token', data.token);
+      onLogin({ ...data.user, token: data.token });
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSignUp = async (e) => {
+    e.preventDefault();
+    clearMessages();
+    setLoading(true);
+    try {
+      const data = await post('/api/auth/signup', { name, email, password });
+      localStorage.setItem('ia_token', data.token);
+      onLogin({ ...data.user, token: data.token });
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleForgot = async (e) => {
+    e.preventDefault();
+    clearMessages();
+    setLoading(true);
+    try {
+      const data = await post('/api/auth/forgot-password', { email });
+      setDemoCode(data.demo_reset_code);
+      setInfo('Demo mode: your reset code is shown below (no email service configured).');
+      setMode('reset');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleReset = async (e) => {
+    e.preventDefault();
+    clearMessages();
+    setLoading(true);
+    try {
+      const data = await post('/api/auth/reset-password', { email, code: resetCode, new_password: newPassword });
+      setInfo(data.message);
+      setMode('form');
+      setActiveTab('signin');
+      setPassword('');
+      setResetCode('');
+      setNewPassword('');
+      setDemoCode('');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleTechLogin = async (e) => {
     e.preventDefault();
+    clearMessages();
     try {
-      const res = await fetch('http://localhost:8001/api/technician/login', {
+      const res = await fetch(`${API}/api/technician/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: techCode.toUpperCase() })
+        body: JSON.stringify({ code: techCode.toUpperCase() }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -35,6 +125,12 @@ const Login = ({ onLogin }) => {
     } catch (err) {
       setError('Server connection failed');
     }
+  };
+
+  const switchTab = (tab) => {
+    setActiveTab(tab);
+    setMode('form');
+    clearMessages();
   };
 
   return (
@@ -73,7 +169,7 @@ const Login = ({ onLogin }) => {
           <div className="flex-1 bg-primary"></div>
         </div>
 
-        <div className="text-center mb-8 mt-4">
+        <div className="text-center mb-6 mt-4">
           <div className="flex items-center justify-center gap-2 mb-3" aria-hidden="true">
             <div className="w-5 h-5 rounded-full bg-danger border-2 border-ink"></div>
             <div className="w-5 h-5 bg-primary border-2 border-ink"></div>
@@ -94,57 +190,203 @@ const Login = ({ onLogin }) => {
 
         <div className="flex border-2 border-ink mb-6">
           <button
-            className={`flex-1 py-2.5 text-sm font-bold uppercase tracking-wide flex items-center justify-center gap-2 transition-colors ${activeTab === 'admin' ? 'bg-primary text-white' : 'bg-surface text-ink hover:bg-surfaceHover'}`}
-            onClick={() => { setActiveTab('admin'); setError(''); }}
+            className={`flex-1 py-2.5 text-xs sm:text-sm font-bold uppercase tracking-wide flex items-center justify-center gap-1.5 transition-colors ${activeTab === 'signin' ? 'bg-primary text-white' : 'bg-surface text-ink hover:bg-surfaceHover'}`}
+            onClick={() => switchTab('signin')}
           >
-            <Shield size={16} /> <span>Admin</span>
+            <Shield size={15} /> <span>Sign In</span>
           </button>
           <button
-            className={`flex-1 py-2.5 text-sm font-bold uppercase tracking-wide flex items-center justify-center gap-2 border-l-2 border-ink transition-colors ${activeTab === 'technician' ? 'bg-accentYellow text-ink' : 'bg-surface text-ink hover:bg-surfaceHover'}`}
-            onClick={() => { setActiveTab('technician'); setError(''); }}
+            className={`flex-1 py-2.5 text-xs sm:text-sm font-bold uppercase tracking-wide flex items-center justify-center gap-1.5 border-l-2 border-ink transition-colors ${activeTab === 'signup' ? 'bg-danger text-white' : 'bg-surface text-ink hover:bg-surfaceHover'}`}
+            onClick={() => switchTab('signup')}
           >
-            <Wrench size={16} /> <span>Technician</span>
+            <UserPlus size={15} /> <span>Sign Up</span>
+          </button>
+          <button
+            className={`flex-1 py-2.5 text-xs sm:text-sm font-bold uppercase tracking-wide flex items-center justify-center gap-1.5 border-l-2 border-ink transition-colors ${activeTab === 'technician' ? 'bg-accentYellow text-ink' : 'bg-surface text-ink hover:bg-surfaceHover'}`}
+            onClick={() => switchTab('technician')}
+          >
+            <Wrench size={15} /> <span>Tech</span>
           </button>
         </div>
 
         {error && (
-          <div className="bg-danger text-white border-2 border-ink text-sm font-medium p-3 mb-4 text-center">
+          <div className="bg-danger text-white border-2 border-ink text-sm font-medium p-3 mb-4 text-center" role="alert">
             {error}
           </div>
         )}
+        {info && (
+          <div className="bg-accentYellow text-ink border-2 border-ink text-sm font-medium p-3 mb-4 text-center" role="status">
+            {info}
+          </div>
+        )}
 
-        {activeTab === 'admin' ? (
-          <form onSubmit={handleAdminLogin} className="flex flex-col gap-4">
+        {activeTab === 'signin' && mode === 'form' && (
+          <form onSubmit={handleSignIn} className="flex flex-col gap-4">
             <div>
-              <label htmlFor="admin-user" className="block text-xs font-bold uppercase tracking-widest text-ink mb-1.5">Username</label>
+              <label htmlFor="signin-email" className={labelClass}>Email</label>
               <input
-                id="admin-user"
-                type="text"
-                value={adminUser}
-                onChange={e => setAdminUser(e.target.value)}
-                className="w-full bg-surface border-2 border-ink px-4 py-3 text-ink placeholder:text-muted focus:outline-none focus:shadow-bauhaus-sm transition-shadow"
-                placeholder="admin"
+                id="signin-email"
+                type="email"
+                required
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                className={inputClass}
+                placeholder="you@company.com"
               />
             </div>
             <div>
-              <label htmlFor="admin-pass" className="block text-xs font-bold uppercase tracking-widest text-ink mb-1.5">Password</label>
+              <label htmlFor="signin-pass" className={labelClass}>Password</label>
               <input
-                id="admin-pass"
+                id="signin-pass"
                 type="password"
-                value={adminPass}
-                onChange={e => setAdminPass(e.target.value)}
-                className="w-full bg-surface border-2 border-ink px-4 py-3 text-ink placeholder:text-muted focus:outline-none focus:shadow-bauhaus-sm transition-shadow"
+                required
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                className={inputClass}
                 placeholder="••••••••"
               />
             </div>
-            <button type="submit" className="btn-bauhaus w-full bg-primary text-white py-3 flex items-center justify-center gap-2 mt-4">
-              <Lock size={18} /> <span>Secure Login</span>
+            <button type="submit" disabled={loading} className="btn-bauhaus w-full bg-primary text-white py-3 flex items-center justify-center gap-2 mt-2 disabled:opacity-60">
+              <Lock size={18} /> <span>{loading ? 'Signing in…' : 'Secure Login'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => { setMode('forgot'); clearMessages(); }}
+              className="text-xs font-bold uppercase tracking-widest text-primary hover:text-ink text-center transition-colors"
+            >
+              Forgot password?
             </button>
           </form>
-        ) : (
+        )}
+
+        {activeTab === 'signin' && mode === 'forgot' && (
+          <form onSubmit={handleForgot} className="flex flex-col gap-4">
+            <p className="text-sm text-muted text-center">
+              Enter your account email and we&apos;ll generate a reset code.
+            </p>
+            <div>
+              <label htmlFor="forgot-email" className={labelClass}>Email</label>
+              <input
+                id="forgot-email"
+                type="email"
+                required
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                className={inputClass}
+                placeholder="you@company.com"
+              />
+            </div>
+            <button type="submit" disabled={loading} className="btn-bauhaus w-full bg-danger text-white py-3 flex items-center justify-center gap-2 mt-2 disabled:opacity-60">
+              <KeyRound size={18} /> <span>{loading ? 'Generating…' : 'Get Reset Code'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => { setMode('form'); clearMessages(); }}
+              className="text-xs font-bold uppercase tracking-widest text-muted hover:text-ink text-center transition-colors"
+            >
+              Back to sign in
+            </button>
+          </form>
+        )}
+
+        {activeTab === 'signin' && mode === 'reset' && (
+          <form onSubmit={handleReset} className="flex flex-col gap-4">
+            {demoCode && (
+              <div className="border-2 border-ink bg-bg p-3 text-center">
+                <p className="text-xs font-bold uppercase tracking-widest text-muted mb-1">Demo Reset Code</p>
+                <p className="text-2xl font-mono font-black tracking-[0.3em] text-ink">{demoCode}</p>
+              </div>
+            )}
+            <div>
+              <label htmlFor="reset-code" className={labelClass}>Reset Code</label>
+              <input
+                id="reset-code"
+                type="text"
+                required
+                value={resetCode}
+                onChange={e => setResetCode(e.target.value)}
+                className={`${inputClass} text-center font-mono tracking-widest`}
+                placeholder="6-digit code"
+              />
+            </div>
+            <div>
+              <label htmlFor="reset-pass" className={labelClass}>New Password</label>
+              <input
+                id="reset-pass"
+                type="password"
+                required
+                minLength={6}
+                value={newPassword}
+                onChange={e => setNewPassword(e.target.value)}
+                className={inputClass}
+                placeholder="At least 6 characters"
+              />
+            </div>
+            <button type="submit" disabled={loading} className="btn-bauhaus w-full bg-primary text-white py-3 flex items-center justify-center gap-2 mt-2 disabled:opacity-60">
+              <KeyRound size={18} /> <span>{loading ? 'Resetting…' : 'Reset Password'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => { setMode('form'); clearMessages(); }}
+              className="text-xs font-bold uppercase tracking-widest text-muted hover:text-ink text-center transition-colors"
+            >
+              Back to sign in
+            </button>
+          </form>
+        )}
+
+        {activeTab === 'signup' && (
+          <form onSubmit={handleSignUp} className="flex flex-col gap-4">
+            <div>
+              <label htmlFor="signup-name" className={labelClass}>Full Name</label>
+              <input
+                id="signup-name"
+                type="text"
+                required
+                value={name}
+                onChange={e => setName(e.target.value)}
+                className={inputClass}
+                placeholder="Jane Doe"
+              />
+            </div>
+            <div>
+              <label htmlFor="signup-email" className={labelClass}>Email</label>
+              <input
+                id="signup-email"
+                type="email"
+                required
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                className={inputClass}
+                placeholder="you@company.com"
+              />
+            </div>
+            <div>
+              <label htmlFor="signup-pass" className={labelClass}>Password</label>
+              <input
+                id="signup-pass"
+                type="password"
+                required
+                minLength={6}
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                className={inputClass}
+                placeholder="At least 6 characters"
+              />
+            </div>
+            <p className="text-xs text-muted text-center border-2 border-ink bg-bg p-2.5">
+              New accounts start as <span className="font-bold text-ink">Employee</span>. Roles are assigned by an Admin from the Employee Directory.
+            </p>
+            <button type="submit" disabled={loading} className="btn-bauhaus w-full bg-danger text-white py-3 flex items-center justify-center gap-2 mt-1 disabled:opacity-60">
+              <UserPlus size={18} /> <span>{loading ? 'Creating account…' : 'Create Account'}</span>
+            </button>
+          </form>
+        )}
+
+        {activeTab === 'technician' && (
           <form onSubmit={handleTechLogin} className="flex flex-col gap-4">
             <div>
-              <label htmlFor="tech-code" className="block text-xs font-bold uppercase tracking-widest text-ink mb-1.5">Assignment Code</label>
+              <label htmlFor="tech-code" className={labelClass}>Assignment Code</label>
               <input
                 id="tech-code"
                 type="text"

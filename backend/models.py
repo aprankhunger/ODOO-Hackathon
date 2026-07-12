@@ -64,3 +64,82 @@ class AuditLog(Base):
     target = Column(String, nullable=True)  # device_id / asset tag / booking id
     details = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    email = Column(String, unique=True, index=True, nullable=False)
+    password_hash = Column(String, nullable=False)
+    role = Column(String, default="employee")  # admin | department_head | asset_manager | employee
+    department_id = Column(Integer, ForeignKey("departments.id"), nullable=True)
+    status = Column(String, default="active")  # active | inactive
+    session_token = Column(String, nullable=True, index=True)
+    reset_code = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    department = relationship("Department", foreign_keys=[department_id])
+
+class Department(Base):
+    __tablename__ = "departments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    head_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    parent_id = Column(Integer, ForeignKey("departments.id"), nullable=True)
+    status = Column(String, default="active")  # active | inactive
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class AssetCategory(Base):
+    __tablename__ = "asset_categories"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    description = Column(String, nullable=True)
+    custom_fields = Column(JSON, nullable=True)  # list of field names, e.g. ["Warranty Period"]
+    status = Column(String, default="active")  # active | inactive
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class AssetItem(Base):
+    __tablename__ = "asset_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    asset_tag = Column(String, unique=True, index=True, nullable=False)
+    name = Column(String, nullable=False)
+    category_id = Column(Integer, ForeignKey("asset_categories.id"), nullable=True)
+    department_id = Column(Integer, ForeignKey("departments.id"), nullable=True)
+    status = Column(String, default="available")  # available | allocated | maintenance | in_transfer
+    assigned_to_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    expected_return_date = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    category = relationship("AssetCategory")
+    assigned_to = relationship("User", foreign_keys=[assigned_to_user_id])
+
+class Booking(Base):
+    __tablename__ = "bookings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    asset_item_id = Column(Integer, ForeignKey("asset_items.id"))
+    user_id = Column(Integer, ForeignKey("users.id"))
+    start_time = Column(DateTime, nullable=False)
+    end_time = Column(DateTime, nullable=False)
+    status = Column(String, default="confirmed")  # confirmed | cancelled | completed
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    asset_item = relationship("AssetItem")
+    user = relationship("User")
+
+class Transfer(Base):
+    __tablename__ = "transfers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    asset_item_id = Column(Integer, ForeignKey("asset_items.id"))
+    from_location = Column(String, nullable=False)
+    to_location = Column(String, nullable=False)
+    status = Column(String, default="pending")  # pending | approved | rejected
+    requested_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    asset_item = relationship("AssetItem")
