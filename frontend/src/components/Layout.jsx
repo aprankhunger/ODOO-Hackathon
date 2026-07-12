@@ -1,7 +1,15 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Activity, MessageSquare, LogOut, Shield, Wrench, BellRing } from 'lucide-react';
+import { Activity, MessageSquare, LogOut, Shield, Wrench, BellRing, LayoutGrid, Building2, Package, CalendarDays, Boxes, ClipboardCheck, BarChart3 } from 'lucide-react';
 import NotificationBell from './NotificationBell';
+
+const ROLE_LABELS = {
+  admin: 'Admin',
+  department_head: 'Dept Head',
+  asset_manager: 'Asset Mgr',
+  employee: 'Employee',
+  technician: 'Technician',
+};
 
 // A hanging pendulum: string + shape sway together from the top anchor
 const Hanger = ({ left, stringH, swayClass, children }) => (
@@ -20,6 +28,8 @@ const Hanger = ({ left, stringH, swayClass, children }) => (
 const Layout = ({ children, user, onLogout }) => {
   const location = useLocation();
   const isAdmin = user?.role === 'admin';
+  const isTechnician = user?.role === 'technician';
+  const isManager = ['admin', 'department_head', 'asset_manager'].includes(user?.role);
 
   const linkClass = (active, activeBg = 'bg-primary text-white') =>
     `flex items-center gap-2 md:gap-3 px-3 md:px-4 py-2.5 md:py-3 border-2 border-ink font-bold uppercase text-xs md:text-sm tracking-wide transition-all whitespace-nowrap ${
@@ -44,34 +54,83 @@ const Layout = ({ children, user, onLogout }) => {
 
           <div className="hidden md:block mb-6 px-2">
             <div className={`text-xs font-bold uppercase tracking-widest flex items-center gap-1 px-2 py-1 border-2 border-ink w-fit ${isAdmin ? 'bg-primary text-white' : 'bg-accentYellow text-ink'}`}>
-              {isAdmin ? <><Shield size={13} /> Admin Mode</> : <><Wrench size={13} /> Technician</>}
+              {isAdmin ? <Shield size={13} /> : <Wrench size={13} />} {ROLE_LABELS[user?.role] || 'User'}
             </div>
+            {user?.name && (
+              <p className="text-xs text-muted mt-1.5 truncate max-w-[200px]">{user.name}</p>
+            )}
           </div>
 
           <div className="flex flex-row md:flex-col gap-2 md:gap-3 overflow-x-auto md:overflow-visible min-w-0">
-            {isAdmin ? (
-              <>
-                <Link to="/" className={linkClass(location.pathname === '/')}>
-                  <Activity size={18} className="flex-shrink-0" />
-                  <span className="hidden sm:inline">Fleet Dashboard</span>
-                  <span className="sm:hidden">Fleet</span>
-                </Link>
-                <Link to="/chat" className={linkClass(location.pathname === '/chat')}>
-                  <MessageSquare size={18} className="flex-shrink-0" />
-                  <span className="hidden sm:inline">AI Insights</span>
-                  <span className="sm:hidden">AI</span>
-                </Link>
-                <Link to="/activity" className={linkClass(location.pathname === '/activity')}>
-                  <BellRing size={18} className="flex-shrink-0" />
-                  <span className="hidden sm:inline">Activity</span>
-                  <span className="sm:hidden">Log</span>
-                </Link>
-              </>
-            ) : (
+            {isTechnician ? (
               <Link to="/" className={linkClass(location.pathname === '/', 'bg-accentYellow text-ink')}>
                 <Wrench size={18} className="flex-shrink-0" />
                 <span>My Tickets</span>
               </Link>
+            ) : (
+              <>
+                <Link to="/" className={linkClass(location.pathname === '/')}>
+                  <LayoutGrid size={18} className="flex-shrink-0" />
+                  <span className="hidden sm:inline">Dashboard</span>
+                  <span className="sm:hidden">Home</span>
+                </Link>
+                <Link to="/allocations" className={linkClass(location.pathname === '/allocations')}>
+                  <Package size={18} className="flex-shrink-0" />
+                  <span className="hidden sm:inline">Allocations</span>
+                  <span className="sm:hidden">Alloc</span>
+                </Link>
+                <Link to="/bookings" className={linkClass(location.pathname === '/bookings')}>
+                  <CalendarDays size={18} className="flex-shrink-0" />
+                  <span className="hidden sm:inline">Bookings</span>
+                  <span className="sm:hidden">Book</span>
+                </Link>
+                <Link to="/assets" className={linkClass(location.pathname === '/assets')}>
+                  <Boxes size={18} className="flex-shrink-0" />
+                  <span className="hidden sm:inline">Assets</span>
+                  <span className="sm:hidden">Assets</span>
+                </Link>
+                <Link to="/maintenance" className={linkClass(location.pathname === '/maintenance')}>
+                  <Wrench size={18} className="flex-shrink-0" />
+                  <span className="hidden sm:inline">Maintenance</span>
+                  <span className="sm:hidden">Fix</span>
+                </Link>
+                <Link to="/audits" className={linkClass(location.pathname === '/audits')}>
+                  <ClipboardCheck size={18} className="flex-shrink-0" />
+                  <span className="hidden sm:inline">Audits</span>
+                  <span className="sm:hidden">Audit</span>
+                </Link>
+                {isManager && (
+                  <Link to="/reports" className={linkClass(location.pathname === '/reports')}>
+                    <BarChart3 size={18} className="flex-shrink-0" />
+                    <span className="hidden sm:inline">Reports</span>
+                    <span className="sm:hidden">Stats</span>
+                  </Link>
+                )}
+                {isAdmin && (
+                  <>
+                    <Link to="/fleet" className={linkClass(location.pathname === '/fleet')}>
+                      <Activity size={18} className="flex-shrink-0" />
+                      <span className="hidden sm:inline">Fleet</span>
+                      <span className="sm:hidden">Fleet</span>
+                    </Link>
+                    <Link to="/chat" className={linkClass(location.pathname === '/chat')}>
+                      <MessageSquare size={18} className="flex-shrink-0" />
+                      <span className="hidden sm:inline">AI Insights</span>
+                      <span className="sm:hidden">AI</span>
+                    </Link>
+                    <Link to="/activity" className={linkClass(location.pathname === '/activity')}>
+                      <BellRing size={18} className="flex-shrink-0" />
+                      <span className="hidden sm:inline">Activity</span>
+                      <span className="sm:hidden">Log</span>
+                    </Link>
+                    <Link to="/organization" className={linkClass(location.pathname === '/organization')}>
+                      <Building2 size={18} className="flex-shrink-0" />
+                      <span className="hidden sm:inline">Organization</span>
+                      <span className="sm:hidden">Org</span>
+                    </Link>
+                  </>
+                )}
+              </>
             )}
           </div>
 
