@@ -73,13 +73,13 @@ const Chatbot = () => {
               </div>
               <div className={`max-w-[80%] rounded-2xl p-5 ${
                 msg.role === 'user' 
-                  ? 'bg-primary/20 text-white ml-auto border border-primary/30' 
-                  : 'bg-surfaceHover text-gray-200 border border-border'
+                  ? 'bg-primary/20 text-black ml-auto border border-primary/30' 
+                  : 'bg-surfaceHover text-black border border-border'
               }`}>
                 {msg.role === 'user' ? (
                   <p>{msg.content}</p>
                 ) : (
-                  <div className="prose prose-invert prose-sm max-w-none prose-p:leading-relaxed prose-pre:bg-bg prose-pre:border-border">
+                  <div className="prose prose-sm max-w-none prose-p:leading-relaxed prose-p:text-black prose-pre:bg-bg prose-pre:border-border">
                     <ReactMarkdown>{msg.content}</ReactMarkdown>
                   </div>
                 )}
