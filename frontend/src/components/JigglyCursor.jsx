@@ -10,12 +10,12 @@ import { motion, useMotionValue, useSpring } from 'framer-motion';
 
 const TRAIL = [
   // size (px), spring stiffness, damping
-  { size: 30, stiffness: 1000, damping: 60 },
-  { size: 24, stiffness: 550, damping: 45 },
-  { size: 19, stiffness: 380, damping: 38 },
-  { size: 15, stiffness: 260, damping: 32 },
-  { size: 11, stiffness: 180, damping: 28 },
-  { size: 8, stiffness: 130, damping: 24 },
+  // Stiff springs all the way down the chain keep the droplets glued
+  // close to each other, so the goo stays connected even on fast flicks.
+  { size: 30, stiffness: 1200, damping: 65 },
+  { size: 23, stiffness: 950, damping: 55 },
+  { size: 16, stiffness: 750, damping: 48 },
+  { size: 10, stiffness: 600, damping: 42 },
 ];
 
 function useGooChain(mouseX, mouseY) {
