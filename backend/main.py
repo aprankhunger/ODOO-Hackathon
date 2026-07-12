@@ -157,7 +157,17 @@ def assign_technician(req: AssignRequest, db: Session = Depends(get_db)):
     if not latest_telemetry:
         raise HTTPException(status_code=404, detail="No telemetry data found for this device")
 
-    telemetry_data = latest_telemetry.detailed_metrics
+    telemetry_data = latest_telemetry.detailed_metrics if latest_telemetry.detailed_metrics else {}
+    
+    # Trim down the telemetry data to avoid token limits
+    trimmed_telemetry = {
+        "cpu": telemetry_data.get("cpu", 0),
+        "ram": telemetry_data.get("ram", 0),
+        "disk": telemetry_data.get("disk", 0),
+        "status": telemetry_data.get("status", "Unknown"),
+        "top_processes": telemetry_data.get("top_processes", [])[:3], # Only top 3
+        "recent_errors": telemetry_data.get("recent_errors", [])[:2] # Only top 2 errors
+    }
 
     # 2. Call Gemini AI to generate a report
     ai_report = "AI Report currently unavailable. (Please set GEMINI_API_KEY)"
@@ -173,7 +183,7 @@ def assign_technician(req: AssignRequest, db: Session = Depends(get_db)):
             3. A strict priority score: 1 (High/Critical), 2 (Medium), or 3 (Low/Healthy). Return this score exactly on the first line as "Priority: X".
             
             Telemetry:
-            {json.dumps(telemetry_data, indent=2)}
+            {json.dumps(trimmed_telemetry, indent=2)}
             """
             
             response = gemini_client.models.generate_content(
@@ -279,6 +289,52 @@ def technician_login(req: LoginRequest, db: Session = Depends(get_db)):
     assigned_devices.sort(key=lambda x: x["priority"])
     
     return {"message": "Login successful", "assigned_devices": assigned_devices}
+
+class ChatRequest(BaseModel):
+    message: str
+
+@app.post("/api/chat")
+def chatbot_interaction(req: ChatRequest, db: Session = Depends(get_db)):
+    assets = db.query(Asset).all()
+    fleet_data = []
+    for asset in assets:
+        latest = db.query(Telemetry).filter(Telemetry.device_id == asset.device_id).order_by(Telemetry.timestamp.desc()).first()
+        if latest:
+            # We trim down the data sent to the AI to prevent Free Tier token limit errors
+            fleet_data.append({
+                "host": asset.hostname,
+                "cpu": latest.cpu_percent,
+                "ram": latest.ram_percent,
+                "disk": latest.disk_percent,
+                "status": latest.status
+            })
+            
+    reply = "AI Chatbot is currently unavailable. (Please set GEMINI_API_KEY in backend/.env)"
+    
+    if gemini_client:
+        try:
+            prompt = f"""
+            You are IntelliAsset AI, an expert IT fleet management assistant. 
+            The user is an IT Admin asking a question about their fleet of devices.
+            
+            Here is the current real-time data for all active devices in the fleet:
+            {json.dumps(fleet_data, indent=2)}
+            
+            User's Question: "{req.message}"
+            
+            Provide a helpful, concise, and professional answer. If they ask about specific metrics (like RAM, CPU, or crashes), refer to the data provided. Use markdown for formatting if needed.
+            """
+            
+            response = gemini_client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=prompt
+            )
+            reply = response.text
+        except Exception as e:
+            print(f"Gemini Chat Error: {e}")
+            reply = f"AI Error: {str(e)}"
+            
+    return {"reply": reply}
 
 if __name__ == "__main__":
     import uvicorn

@@ -1,114 +1,126 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Send, Bot, User, Sparkles } from 'lucide-react';
+import { Send, Bot, User, Loader2 } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 
 const Chatbot = () => {
   const [messages, setMessages] = useState([
-    { id: 1, sender: 'bot', text: 'Hello! I am IntelliAsset AI. How can I help you analyze your fleet today?' }
+    { role: 'assistant', content: 'Hello! I am IntelliAsset AI. I have full access to your fleet telemetry data. Ask me anything about your devices (e.g., "Which machines have high RAM usage?" or "Are there any critical errors?").' }
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const messagesEndRef = useRef(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
 
   const handleSend = async (e) => {
     e.preventDefault();
-    const question = input.trim();
-    if (!question || isLoading) return;
+    if (!input.trim() || isLoading) return;
 
-    setMessages(prev => [...prev, { id: Date.now(), sender: 'user', text: question }]);
+    const userMessage = input.trim();
     setInput('');
+    setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
     setIsLoading(true);
 
     try {
-      const res = await fetch('http://localhost:8001/api/chat', {
+      const response = await fetch('http://localhost:8001/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: question })
+        body: JSON.stringify({ message: userMessage })
       });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.detail || 'Request failed');
-      }
-      setMessages(prev => [...prev, { id: Date.now() + 1, sender: 'bot', text: data.reply }]);
-    } catch (err) {
-      setMessages(prev => [...prev, {
-        id: Date.now() + 1,
-        sender: 'bot',
-        text: `Sorry, I could not reach the AI service. ${err.message}`
-      }]);
+      
+      const data = await response.json();
+      setMessages(prev => [...prev, { role: 'assistant', content: data.reply }]);
+    } catch (error) {
+      setMessages(prev => [...prev, { role: 'assistant', content: 'Error: Failed to connect to Central Hub.' }]);
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 16 }}
+    <motion.div 
+      initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4 }}
-      className="flex flex-col h-[calc(100vh-8rem)] max-w-4xl mx-auto"
+      className="max-w-4xl mx-auto h-[calc(100vh-8rem)] flex flex-col"
     >
-      <header className="mb-6 flex items-center gap-3">
-        <div className="w-11 h-11 bg-accentYellow border-2 border-ink shadow-bauhaus-sm flex items-center justify-center">
-          <Sparkles className="text-ink" size={20} />
-        </div>
-        <div>
-          <h2 className="text-2xl font-display font-black uppercase tracking-tight">AI Assistant</h2>
-          <p className="text-muted text-sm">Query your fleet data using natural language</p>
-        </div>
+      <header className="mb-6">
+        <h2 className="text-3xl font-bold tracking-tight mb-2 text-primary">Fleet Intelligence AI</h2>
+        <p className="text-gray-400">Ask natural language questions about your live fleet telemetry.</p>
       </header>
 
-      <div className="flex-1 bg-surface border-2 border-ink shadow-bauhaus flex flex-col overflow-hidden">
-        {/* Bauhaus color bar */}
-        <div className="w-full h-1.5 flex flex-shrink-0" aria-hidden="true">
-          <div className="flex-1 bg-danger"></div>
-          <div className="flex-1 bg-accentYellow"></div>
-          <div className="flex-1 bg-primary"></div>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-6">
-          {messages.map((msg) => (
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              key={msg.id}
-              className={`flex items-start gap-4 ${msg.sender === 'user' ? 'flex-row-reverse' : ''}`}
+      <div className="flex-1 glass-card flex flex-col overflow-hidden border border-primary/20 shadow-lg shadow-primary/10">
+        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+          {messages.map((msg, idx) => (
+            <motion.div 
+              key={idx}
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className={`flex items-start space-x-4 ${msg.role === 'user' ? 'flex-row-reverse space-x-reverse' : ''}`}
             >
-              <div className={`w-9 h-9 border-2 border-ink flex items-center justify-center flex-shrink-0 ${msg.sender === 'bot' ? 'bg-primary rounded-full' : 'bg-danger'}`}>
-                {msg.sender === 'bot' ? <Bot size={16} className="text-white" /> : <User size={16} className="text-white" />}
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 shadow-lg ${
+                msg.role === 'user' 
+                  ? 'bg-gradient-to-br from-blue-500 to-indigo-600' 
+                  : 'bg-gradient-to-br from-purple-500 to-pink-600'
+              }`}>
+                {msg.role === 'user' ? <User size={20} className="text-white"/> : <Bot size={20} className="text-white"/>}
               </div>
-              <div className={`px-5 py-3 max-w-[80%] border-2 border-ink ${msg.sender === 'bot' ? 'bg-surfaceHover text-ink shadow-bauhaus-sm' : 'bg-primary text-white shadow-bauhaus-sm'}`}>
-                <p className="text-sm leading-relaxed">{msg.text}</p>
+              <div className={`max-w-[80%] rounded-2xl p-5 ${
+                msg.role === 'user' 
+                  ? 'bg-primary/20 text-white ml-auto border border-primary/30' 
+                  : 'bg-surfaceHover text-gray-200 border border-border'
+              }`}>
+                {msg.role === 'user' ? (
+                  <p>{msg.content}</p>
+                ) : (
+                  <div className="prose prose-invert prose-sm max-w-none prose-p:leading-relaxed prose-pre:bg-bg prose-pre:border-border">
+                    <ReactMarkdown>{msg.content}</ReactMarkdown>
+                  </div>
+                )}
               </div>
             </motion.div>
           ))}
+          
           {isLoading && (
-            <div className="flex items-start gap-4">
-              <div className="w-9 h-9 border-2 border-ink flex items-center justify-center flex-shrink-0 bg-primary rounded-full">
-                <Bot size={16} className="text-white" />
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="flex items-start space-x-4"
+            >
+              <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 bg-gradient-to-br from-purple-500 to-pink-600 shadow-lg">
+                <Bot size={20} className="text-white"/>
               </div>
-              <div className="px-5 py-3 border-2 border-ink bg-surfaceHover text-ink shadow-bauhaus-sm">
-                <p className="text-sm leading-relaxed animate-pulse">Analyzing fleet data...</p>
+              <div className="bg-surfaceHover rounded-2xl p-5 border border-border flex items-center space-x-3">
+                <Loader2 size={18} className="animate-spin text-purple-400" />
+                <span className="text-gray-400 text-sm font-medium">Analyzing fleet data...</span>
               </div>
-            </div>
+            </motion.div>
           )}
+          <div ref={messagesEndRef} />
         </div>
 
-        <div className="p-4 border-t-2 border-ink bg-bg">
-          <form onSubmit={handleSend} className="relative flex items-center">
+        <div className="p-4 bg-surface border-t border-border">
+          <form onSubmit={handleSend} className="flex space-x-3">
             <input
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask about device health, network issues, or maintenance..."
-              className="w-full bg-surface border-2 border-ink px-5 py-4 pr-16 focus:outline-none focus:shadow-bauhaus-sm transition-shadow text-sm text-ink placeholder:text-muted"
+              placeholder="e.g. Which laptops have the most critical errors right now?"
+              className="flex-1 bg-bg border border-border rounded-xl px-5 py-4 text-white focus:outline-none focus:border-primary transition-colors shadow-inner"
             />
             <button
               type="submit"
               aria-label="Send message"
-              disabled={isLoading}
-              className="absolute right-2 p-2.5 bg-accentYellow border-2 border-ink text-ink hover:bg-primary hover:text-white transition-colors disabled:opacity-50"
+              disabled={isLoading || !input.trim()}
+              className="bg-primary hover:bg-blue-600 disabled:opacity-50 disabled:hover:bg-primary text-white rounded-xl px-6 py-4 flex items-center justify-center transition-all shadow-lg shadow-primary/20"
             >
-              <Send size={18} />
+              <Send size={20} className={isLoading ? 'opacity-50' : ''} />
             </button>
           </form>
         </div>
