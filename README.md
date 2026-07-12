@@ -1,5 +1,7 @@
 # IntelliAsset
 
+**Live Demo:** [https://odoo-hackathon-gamma-orpin.vercel.app/](https://odoo-hackathon-gamma-orpin.vercel.app/)
+
 A modern, Bauhaus-inspired asset management system with AI-powered automation and real-time analytics.
 
 ## Features

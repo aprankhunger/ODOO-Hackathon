@@ -37,7 +37,7 @@ except ImportError:
 # The chosen URL is persisted to ~/.intelliasset/config.json so it "just works"
 # on every subsequent run.
 # ---------------------------------------------------------------------------
-DEFAULT_BACKEND_URL = "https://intelliasset-backend.onrender.com"
+DEFAULT_BACKEND_URL = "https://odoo-hackathon-r19v.onrender.com"
 CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".intelliasset")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
 
