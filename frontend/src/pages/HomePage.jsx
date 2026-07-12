@@ -22,8 +22,8 @@ export default function HomePage() {
   const features = [
     {
       icon: Truck,
-      title: 'Fleet Management',
-      description: 'Manage your entire fleet of vehicles with real-time tracking and status updates.',
+      title: 'Asset Management',
+      description: 'Manage all your assets with real-time tracking and status updates.',
       color: 'primary'
     },
     {
@@ -59,7 +59,7 @@ export default function HomePage() {
   ];
 
   const stats = [
-    { label: 'Fleet Assets', value: '∞', delay: 0 },
+    { label: 'Total Assets', value: '∞', delay: 0 },
     { label: 'Real-time Tracking', value: '24/7', delay: 100 },
     { label: 'AI Agent Ready', value: '✓', delay: 200 },
   ];
@@ -96,16 +96,16 @@ export default function HomePage() {
 
           {/* Main heading */}
           <h1 className="font-display font-black text-7xl md:text-8xl leading-tight mb-6 uppercase tracking-tighter">
-            Fleet
+            <span className="text-primary">Intelli</span>
             <br />
-            <span className="text-primary">Intelligence</span>
+            Asset
             <br />
-            Platform
+            Management
           </h1>
 
           {/* Subheading */}
           <p className="text-lg md:text-2xl font-medium text-muted mb-12 max-w-2xl mx-auto leading-relaxed">
-            Manage, track, and optimize your entire fleet with AI-powered insights and real-time collaboration tools.
+            Manage, track, and optimize all your assets with AI-powered insights and real-time collaboration tools.
           </p>
 
           {/* CTA Buttons */}
@@ -156,7 +156,7 @@ export default function HomePage() {
               </h2>
 
               <p className="text-base md:text-lg text-muted mb-8 leading-relaxed">
-                Control your entire fleet infrastructure through a powerful CLI agent. Execute commands, generate reports, and manage operations—all from your terminal with natural language processing.
+                Control your entire asset infrastructure through a powerful CLI agent. Execute commands, generate reports, and manage operations—all from your terminal with natural language processing.
               </p>
 
               <div className="mb-8">
@@ -165,10 +165,10 @@ export default function HomePage() {
                   <pre className="text-ink">
                     <code>{`$ python agent/main.py
 
-> fleet allocate --strategy optimal
-> fleet report --type maintenance
-> fleet asset list --status active
-> fleet analyze --period month`}</code>
+> assets allocate --strategy optimal
+> assets report --type maintenance
+> assets list --status active
+> assets analyze --period month`}</code>
                   </pre>
                 </div>
               </div>
@@ -192,10 +192,10 @@ export default function HomePage() {
                 </div>
                 
                 <div className="space-y-2 font-mono text-xs text-accentYellow">
-                  <p>{'> allocate fleet --ai-optimized true'}</p>
+                  <p>{'> allocate assets --ai-optimized true'}</p>
                   <p className="text-success">{'✓ Optimal allocation: 47 assignments'}</p>
                   <p className="mt-4">{'> analyze maintenance --predict-failures'}</p>
-                  <p className="text-warning">{'⚠ 3 vehicles require attention'}</p>
+                  <p className="text-warning">{'⚠ 3 assets require attention'}</p>
                   <p className="mt-4">{'> generate report --format pdf'}</p>
                   <p className="text-success">{'✓ Report generated: report_2024.pdf'}</p>
                   <p className="mt-4 opacity-50 animate-pulse">{'█ awaiting command...'}</p>
@@ -217,7 +217,7 @@ export default function HomePage() {
               <span className="text-xs font-bold uppercase tracking-widest">[ CAPABILITIES ]</span>
             </div>
             <h2 className="font-display font-black text-5xl md:text-6xl uppercase leading-tight">
-              Complete Fleet
+              Complete Asset
               <br />
               <span className="text-primary">Ecosystem</span>
             </h2>
@@ -260,11 +260,11 @@ export default function HomePage() {
           <h2 className="font-display font-black text-5xl md:text-6xl uppercase leading-tight mb-6">
             Ready to Optimize
             <br />
-            <span className="text-accentYellow">Your Fleet?</span>
+            <span className="text-accentYellow">Your Assets?</span>
           </h2>
           
           <p className="text-lg md:text-xl text-surface/80 mb-12 max-w-2xl mx-auto">
-            Join leading organizations using our intelligent fleet management platform to reduce costs and improve efficiency.
+            Join leading organizations using IntelliAsset to reduce costs and improve efficiency.
           </p>
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
@@ -284,8 +284,8 @@ export default function HomePage() {
         <div className="max-w-6xl mx-auto">
           <div className="grid md:grid-cols-4 gap-8 mb-12">
             <div>
-              <h3 className="font-display font-black text-lg uppercase mb-4">Fleet Platform</h3>
-              <p className="text-sm text-muted">Intelligent fleet management for the modern enterprise.</p>
+              <h3 className="font-display font-black text-lg uppercase mb-4">IntelliAsset</h3>
+              <p className="text-sm text-muted">Intelligent asset management for the modern enterprise.</p>
             </div>
             
             <div>
@@ -322,7 +322,7 @@ export default function HomePage() {
           <div className="border-t-2 border-ink pt-8">
             <div className="flex flex-col md:flex-row items-center justify-between">
               <p className="text-sm text-muted">
-                © 2024 Fleet Intelligence Platform. All rights reserved.
+                © 2024 IntelliAsset. All rights reserved.
               </p>
               <p className="text-sm font-bold text-primary mt-4 md:mt-0">
                 Designed & Built by <span className="uppercase">Apran Khunger</span>

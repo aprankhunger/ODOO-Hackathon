@@ -5,7 +5,7 @@ import ReactMarkdown from 'react-markdown';
 
 const Chatbot = () => {
   const [messages, setMessages] = useState([
-    { role: 'assistant', content: 'Hello! I am IntelliAsset AI. I have full access to your fleet telemetry data. Ask me anything about your devices (e.g., "Which machines have high RAM usage?" or "Are there any critical errors?").' }
+    { role: 'assistant', content: 'Hello! I am IntelliAsset AI. I have full access to your asset telemetry data. Ask me anything about your assets (e.g., "Which assets have high utilization?" or "Are there any maintenance concerns?").' }
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -51,8 +51,8 @@ const Chatbot = () => {
       className="max-w-4xl mx-auto h-[calc(100vh-8rem)] flex flex-col"
     >
       <header className="mb-6">
-        <h2 className="text-3xl font-bold tracking-tight mb-2 text-primary">Fleet Intelligence AI</h2>
-        <p className="text-gray-400">Ask natural language questions about your live fleet telemetry.</p>
+        <h2 className="text-3xl font-bold tracking-tight mb-2 text-primary">IntelliAsset AI</h2>
+        <p className="text-gray-400">Ask natural language questions about your asset telemetry.</p>
       </header>
 
       <div className="flex-1 glass-card flex flex-col overflow-hidden border border-primary/20 shadow-lg shadow-primary/10">
@@ -98,7 +98,7 @@ const Chatbot = () => {
               </div>
               <div className="bg-surfaceHover rounded-2xl p-5 border border-border flex items-center space-x-3">
                 <Loader2 size={18} className="animate-spin text-purple-400" />
-                <span className="text-gray-400 text-sm font-medium">Analyzing fleet data...</span>
+                <span className="text-gray-400 text-sm font-medium">Analyzing asset data...</span>
               </div>
             </motion.div>
           )}

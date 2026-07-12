@@ -1,11 +1,11 @@
-# Fleet Intelligence Platform
+# IntelliAsset
 
-A modern, Bauhaus-inspired fleet and asset management system with AI-powered automation and real-time analytics.
+A modern, Bauhaus-inspired asset management system with AI-powered automation and real-time analytics.
 
 ## Features
 
 ### Core System
-- **Fleet Management** - Manage your entire fleet of vehicles with real-time tracking
+- **Asset Management** - Manage all your assets with real-time tracking
 - **Smart Allocations** - AI-optimized resource allocation for maximum efficiency
 - **Advanced Analytics** - Comprehensive reporting and data-driven insights
 - **Maintenance Tracking** - Schedule and track maintenance records for all assets
@@ -14,7 +14,7 @@ A modern, Bauhaus-inspired fleet and asset management system with AI-powered aut
 
 ### Unique Selling Point: AI Agent CLI
 
-The system includes a powerful command-line interface (CLI) agent that enables complete fleet automation through natural language commands.
+The system includes a powerful command-line interface (CLI) agent that enables complete asset automation through natural language commands.
 
 #### Quick Start
 
@@ -24,39 +24,39 @@ Navigate to the `agent/` directory and run:
 python agent/main.py
 ```
 
-This launches an interactive AI agent that understands fleet management commands.
+This launches an interactive AI agent that understands asset management commands.
 
 #### Example Commands
 
 ```bash
-# Allocate fleet resources using AI optimization
-> fleet allocate --strategy optimal
+# Allocate assets using AI optimization
+> assets allocate --strategy optimal
 
 # Generate maintenance reports
-> fleet report --type maintenance
+> assets report --type maintenance
 
 # List active assets
-> fleet asset list --status active
+> assets list --status active
 
-# Analyze fleet performance for a specific period
-> fleet analyze --period month
+# Analyze asset performance for a specific period
+> assets analyze --period month
 
-# Get real-time fleet status
-> fleet status --include-analytics
+# Get real-time asset status
+> assets status --include-analytics
 
-# Schedule maintenance for vehicles
-> fleet maintenance schedule --vehicle-ids 1,2,3
+# Schedule maintenance for assets
+> assets maintenance schedule --asset-ids 1,2,3
 
-# Export fleet data
-> fleet export --format csv --output fleet_data.csv
+# Export asset data
+> assets export --format csv --output assets_data.csv
 ```
 
 #### Agent Capabilities
 
-- **Natural Language Processing** - Understand conversational fleet commands
+- **Natural Language Processing** - Understand conversational asset commands
 - **Real-time Decision Making** - Make allocation and routing decisions instantly
 - **Report Generation** - Create comprehensive PDF/CSV reports
-- **Predictive Maintenance** - Identify vehicles requiring attention
+- **Predictive Maintenance** - Identify assets requiring attention
 - **Cost Optimization** - Suggest optimal resource allocation strategies
 - **Compliance Checking** - Validate operations against business rules
 
@@ -94,7 +94,7 @@ python main.py
 
 ```
 ODOO-Hackathon/
-├── backend/           # FastAPI backend with auth and fleet APIs
+├── backend/           # FastAPI backend with auth and asset APIs
 ├── frontend/          # React + Vite frontend with Bauhaus design
 ├── agent/            # Python CLI agent with AI capabilities
 └── README.md         # This file
@@ -113,7 +113,7 @@ The application follows a **Bauhaus-inspired design philosophy**:
 
 ### Admin
 - Full access to all features
-- Fleet management and configuration
+- Asset management and configuration
 - Organization settings
 - AI chatbot access
 - Activity log viewing
@@ -128,8 +128,8 @@ The application follows a **Bauhaus-inspired design philosophy**:
 ## Key Pages
 
 - **Home** - Landing page with feature overview and AI agent showcase
-- **Dashboard** - Real-time fleet overview and key metrics
-- **Fleet** - Detailed vehicle management (Admin only)
+- **Dashboard** - Real-time asset overview and key metrics
+- **Fleet Overview** - Detailed asset management (Admin only)
 - **Allocations** - Resource allocation and optimization
 - **Bookings** - Vehicle booking management
 - **Maintenance** - Maintenance scheduling and tracking
@@ -160,7 +160,7 @@ The system uses email/password authentication with JWT tokens:
 
 Backend (`backend/.env`):
 ```
-DATABASE_URL=postgresql://user:password@localhost/fleetdb
+DATABASE_URL=postgresql://user:password@localhost/intelliasset_db
 JWT_SECRET=your-secret-key
 API_PORT=8001
 ```
@@ -199,7 +199,7 @@ gunicorn main:app
 
 ## License
 
-All rights reserved © 2024 Fleet Intelligence Platform
+All rights reserved © 2024 IntelliAsset
 
 ---
 
