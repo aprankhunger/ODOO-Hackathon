@@ -152,14 +152,18 @@ def get_fast_metrics():
 
     # Top 5 Processes
     procs = []
+    cpu_count = psutil.cpu_count() or 1
     for p in psutil.process_iter(['pid', 'name', 'cpu_percent']):
         try:
-            # Note: getting cpu_percent from process_iter without interval might be 0.0 initially
-            # but will stabilize over loop iterations.
-            procs.append(p.info)
-        except psutil.NoSuchProcess:
+            info = p.info
+            if info['name'] == 'System Idle Process' or info['pid'] == 0:
+                continue
+            if info['cpu_percent'] is not None:
+                info['cpu_percent'] = round(info['cpu_percent'] / cpu_count, 1)
+                procs.append(info)
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             pass
-    procs = sorted([p for p in procs if p['cpu_percent'] is not None], key=lambda x: x['cpu_percent'], reverse=True)[:5]
+    procs = sorted(procs, key=lambda x: x['cpu_percent'], reverse=True)[:5]
 
     # Temperature (Often fails on Windows without admin/WMI specific drivers)
     temp = "N/A"
