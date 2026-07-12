@@ -19,6 +19,8 @@ except ImportError:
     genai = None
 
 load_dotenv()
+# Fallback: also load shared project env if present (e.g. v0 sandbox)
+load_dotenv("/vercel/share/.env.project")
 
 # Initialize Gemini Client if API key is present
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -46,6 +48,9 @@ class AssignRequest(BaseModel):
 
 class LoginRequest(BaseModel):
     code: str
+
+class ChatRequest(BaseModel):
+    message: str
 
 @app.websocket("/ws/dashboard")
 async def websocket_dashboard(websocket: WebSocket):
@@ -199,6 +204,57 @@ def assign_technician(req: AssignRequest, db: Session = Depends(get_db)):
     db.commit()
     
     return {"message": "Technician assigned", "code": code, "priority": priority}
+
+@app.post("/api/chat")
+def chat(req: ChatRequest, db: Session = Depends(get_db)):
+    if not gemini_client:
+        raise HTTPException(
+            status_code=503,
+            detail="Gemini is not configured. Set the GEMINI_API_KEY environment variable and restart the backend."
+        )
+
+    # Build fleet context from the database
+    assets = db.query(Asset).all()
+    fleet_context = []
+    for asset in assets:
+        latest = (
+            db.query(Telemetry)
+            .filter(Telemetry.device_id == asset.device_id)
+            .order_by(Telemetry.timestamp.desc())
+            .first()
+        )
+        fleet_context.append({
+            "device_id": asset.device_id,
+            "hostname": asset.hostname,
+            "os": asset.os_name,
+            "status": latest.status if latest else "Unknown",
+            "cpu_percent": latest.cpu_percent if latest else None,
+            "ram_percent": latest.ram_percent if latest else None,
+            "disk_percent": latest.disk_percent if latest else None,
+            "last_seen": str(latest.timestamp) if latest else None,
+        })
+
+    prompt = f"""
+    You are IntelliAsset AI, an expert IT fleet-monitoring assistant.
+    Answer the user's question using the live fleet data below.
+    Be concise, actionable, and reference specific devices by hostname when relevant.
+    If the fleet data is empty, say that no devices are currently registered and answer generally.
+
+    Fleet data:
+    {json.dumps(fleet_context, indent=2)}
+
+    User question: {req.message}
+    """
+
+    try:
+        response = gemini_client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt
+        )
+        return {"reply": response.text}
+    except Exception as e:
+        print(f"Gemini API Error: {e}")
+        raise HTTPException(status_code=502, detail=f"Gemini request failed: {str(e)}")
 
 @app.post("/api/technician/login")
 def technician_login(req: LoginRequest, db: Session = Depends(get_db)):

@@ -7,23 +7,37 @@ const Chatbot = () => {
     { id: 1, sender: 'bot', text: 'Hello! I am IntelliAsset AI. How can I help you analyze your fleet today?' }
   ]);
   const [input, setInput] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleSend = (e) => {
+  const handleSend = async (e) => {
     e.preventDefault();
-    if (!input.trim()) return;
+    const question = input.trim();
+    if (!question || isLoading) return;
 
-    const newMsg = { id: Date.now(), sender: 'user', text: input };
-    setMessages(prev => [...prev, newMsg]);
+    setMessages(prev => [...prev, { id: Date.now(), sender: 'user', text: question }]);
     setInput('');
+    setIsLoading(true);
 
-    // Mock response
-    setTimeout(() => {
+    try {
+      const res = await fetch('http://localhost:8001/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: question })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || 'Request failed');
+      }
+      setMessages(prev => [...prev, { id: Date.now() + 1, sender: 'bot', text: data.reply }]);
+    } catch (err) {
       setMessages(prev => [...prev, {
         id: Date.now() + 1,
         sender: 'bot',
-        text: 'I am analyzing the telemetry data for your request. Currently, Device-X49 is showing a high CPU temperature which could lead to failure in the next 48 hours.'
+        text: `Sorry, I could not reach the AI service. ${err.message}`
       }]);
-    }, 1000);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -67,6 +81,16 @@ const Chatbot = () => {
               </div>
             </motion.div>
           ))}
+          {isLoading && (
+            <div className="flex items-start gap-4">
+              <div className="w-9 h-9 border-2 border-ink flex items-center justify-center flex-shrink-0 bg-primary rounded-full">
+                <Bot size={16} className="text-white" />
+              </div>
+              <div className="px-5 py-3 border-2 border-ink bg-surfaceHover text-ink shadow-bauhaus-sm">
+                <p className="text-sm leading-relaxed animate-pulse">Analyzing fleet data...</p>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="p-4 border-t-2 border-ink bg-bg">
@@ -81,7 +105,8 @@ const Chatbot = () => {
             <button
               type="submit"
               aria-label="Send message"
-              className="absolute right-2 p-2.5 bg-accentYellow border-2 border-ink text-ink hover:bg-primary hover:text-white transition-colors"
+              disabled={isLoading}
+              className="absolute right-2 p-2.5 bg-accentYellow border-2 border-ink text-ink hover:bg-primary hover:text-white transition-colors disabled:opacity-50"
             >
               <Send size={18} />
             </button>
