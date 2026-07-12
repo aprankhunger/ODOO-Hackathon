@@ -43,6 +43,10 @@ Base.metadata.create_all(bind=engine)
 def ensure_columns():
     from sqlalchemy import text
     new_columns = {
+        "assets": [
+            ("owner_user_id", "INTEGER"),
+            ("asset_item_id", "INTEGER"),
+        ],
         "asset_items": [
             ("is_bookable", "BOOLEAN DEFAULT 0"),
             ("overdue_flagged", "BOOLEAN DEFAULT 0"),
@@ -242,6 +246,13 @@ def require_admin(user: User = Depends(get_current_user)) -> User:
         raise HTTPException(status_code=403, detail="Admin access required")
     return user
 
+MANAGER_ROLES = ("admin", "department_head", "asset_manager")
+
+def require_manager(user: User = Depends(get_current_user)) -> User:
+    if user.role not in MANAGER_ROLES:
+        raise HTTPException(status_code=403, detail="Only Managers or Admins can track devices")
+    return user
+
 def seed_org_data():
     """Seed admin user, departments, categories, asset items, bookings, transfers."""
     db = SessionLocal()
@@ -406,45 +417,108 @@ class ChatRequest(BaseModel):
     message: str
 
 @app.websocket("/ws/dashboard")
-async def websocket_dashboard(websocket: WebSocket):
+async def websocket_dashboard(websocket: WebSocket, token: str = None, db: Session = Depends(get_db)):
+    # Only Managers and Admins may watch the live tracking feed.
+    user = db.query(User).filter(User.session_token == token).first() if token else None
+    if not user or user.status != "active" or user.role not in MANAGER_ROLES:
+        await websocket.close(code=4403)
+        return
     await websocket.accept()
     dashboard_connections.append(websocket)
     try:
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
-        dashboard_connections.remove(websocket)
+        if websocket in dashboard_connections:
+            dashboard_connections.remove(websocket)
+
+def _next_af_tag(db: Session) -> str:
+    tags = [i.asset_tag for i in db.query(AssetItem).filter(AssetItem.asset_tag.like("AF-%")).all()]
+    max_num = 0
+    for t in tags:
+        try:
+            max_num = max(max_num, int(t.split("-")[1]))
+        except (IndexError, ValueError):
+            pass
+    return f"AF-{max_num + 1:04d}"
 
 @app.post("/api/assets/register")
-async def register_asset(data: dict, db: Session = Depends(get_db)):
+async def register_asset(data: dict, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Enroll the machine running the monitoring agent as a tracked asset.
+
+    Any signed-in user (employee, manager, or admin) can enroll their own
+    device. The device is linked to their account and an AssetItem is
+    created in the asset directory, allocated to them.
+    """
     device_id = data.get("device_id")
     if not device_id:
-        return {"error": "device_id is required"}
-    
+        raise HTTPException(status_code=400, detail="device_id is required")
+
+    hostname = data.get("hostname", "Unknown Device")
+    os_name = data.get("os_name", "Unknown OS")
+
     existing_asset = db.query(Asset).filter(Asset.device_id == device_id).first()
     if existing_asset:
-        return {"message": "Asset already registered", "device_id": device_id}
-    
-    hostname = data.get("hostname", "Unknown Device")
+        # Keep hostname/OS fresh and (re)link ownership to the current user.
+        existing_asset.hostname = hostname
+        existing_asset.os_name = os_name
+        if existing_asset.owner_user_id != user.id:
+            existing_asset.owner_user_id = user.id
+            item = db.query(AssetItem).filter(AssetItem.id == existing_asset.asset_item_id).first() if existing_asset.asset_item_id else None
+            if item:
+                item.assigned_to_user_id = user.id
+                item.status = "allocated"
+        db.commit()
+        item = db.query(AssetItem).filter(AssetItem.id == existing_asset.asset_item_id).first() if existing_asset.asset_item_id else None
+        return {
+            "message": "Device already enrolled — ownership confirmed",
+            "device_id": device_id,
+            "owner": user.name,
+            "asset_tag": item.asset_tag if item else None,
+        }
+
+    # Create the directory entry (AssetItem) for this device
+    tag = _next_af_tag(db)
+    item = AssetItem(
+        asset_tag=tag,
+        name=f"{hostname} (Monitored Device)",
+        department_id=user.department_id,
+        status="allocated",
+        assigned_to_user_id=user.id,
+        custom_field_values={"Device ID": device_id, "OS": os_name, "Enrolled via": "Monitoring Agent"},
+    )
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+
+    db.add(AllocationHistory(
+        asset_item_id=item.id,
+        user_id=user.id,
+        condition_notes="Self-enrolled via monitoring agent",
+    ))
+
     new_asset = Asset(
         device_id=device_id,
         hostname=hostname,
-        os_name=data.get("os_name", "Unknown OS")
+        os_name=os_name,
+        owner_user_id=user.id,
+        asset_item_id=item.id,
     )
     db.add(new_asset)
     db.commit()
 
-    log_action(db, actor="system", actor_role="system", action="ASSET_REGISTERED", target=device_id, details=f"Registered {hostname}.")
+    log_action(db, actor=user.email, actor_role=user.role, action="DEVICE_ENROLLED", target=tag,
+               details=f"{user.name} enrolled {hostname} ({device_id}) via the monitoring agent.")
     await create_notification(
         db,
         recipient_role="admin",
         type="asset_registered",
-        title="New Asset Registered",
-        message=f"{hostname} ({device_id}) joined the fleet.",
+        title="Device Enrolled",
+        message=f"{user.name} enrolled {hostname} ({tag}) via the monitoring agent.",
         severity="info",
     )
-    
-    return {"message": "Asset registered successfully", "device_id": device_id}
+
+    return {"message": "Device enrolled successfully", "device_id": device_id, "owner": user.name, "asset_tag": tag}
 
 @app.websocket("/ws/ingest/{device_id}")
 async def websocket_ingest(websocket: WebSocket, device_id: str, db: Session = Depends(get_db)):
@@ -491,23 +565,28 @@ async def websocket_ingest(websocket: WebSocket, device_id: str, db: Session = D
         print(f"Agent {device_id} disconnected")
 
 @app.get("/api/assets")
-def get_all_assets(db: Session = Depends(get_db)):
+def get_all_assets(user: User = Depends(require_manager), db: Session = Depends(get_db)):
     assets = db.query(Asset).all()
     result = []
     for asset in assets:
         latest = db.query(Telemetry).filter(Telemetry.device_id == asset.device_id).order_by(Telemetry.timestamp.desc()).first()
+        owner = db.query(User).filter(User.id == asset.owner_user_id).first() if asset.owner_user_id else None
+        item = db.query(AssetItem).filter(AssetItem.id == asset.asset_item_id).first() if asset.asset_item_id else None
         result.append({
             "device_id": asset.device_id,
             "hostname": asset.hostname,
             "os_name": asset.os_name,
             "registered_at": asset.registered_at,
+            "owner_name": owner.name if owner else None,
+            "owner_role": owner.role if owner else None,
+            "asset_tag": item.asset_tag if item else None,
             "latest_status": latest.status if latest else "Unknown",
             "last_seen": latest.timestamp if latest else None
         })
     return result
 
 @app.get("/api/assets/{device_id}")
-def get_asset_details(device_id: str, db: Session = Depends(get_db)):
+def get_asset_details(device_id: str, user: User = Depends(require_manager), db: Session = Depends(get_db)):
     asset = db.query(Asset).filter(Asset.device_id == device_id).first()
     if not asset:
         return {"error": "Asset not found"}
@@ -520,7 +599,7 @@ def get_asset_details(device_id: str, db: Session = Depends(get_db)):
     }
 
 @app.post("/api/admin/assign")
-async def assign_technician(req: AssignRequest, db: Session = Depends(get_db)):
+async def assign_technician(req: AssignRequest, user: User = Depends(require_manager), db: Session = Depends(get_db)):
     # 1. Fetch latest telemetry
     latest_telemetry = db.query(Telemetry).filter(Telemetry.device_id == req.device_id).order_by(Telemetry.timestamp.desc()).first()
     if not latest_telemetry:
@@ -1111,8 +1190,6 @@ def dashboard_summary(user: User = Depends(get_current_user), db: Session = Depe
 # ---------------------------------------------------------------------------
 # Asset Allocation & Transfer endpoints (Screen 5)
 # ---------------------------------------------------------------------------
-
-MANAGER_ROLES = ("admin", "department_head", "asset_manager")
 
 def serialize_asset_item(item: AssetItem, db: Session, now: datetime = None):
     now = now or datetime.utcnow()

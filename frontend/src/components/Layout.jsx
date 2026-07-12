@@ -106,13 +106,15 @@ const Layout = ({ children, user, onLogout }) => {
                     <span className="sm:hidden">Stats</span>
                   </Link>
                 )}
+                {isManager && (
+                  <Link to="/fleet-overview" className={linkClass(location.pathname === '/fleet-overview')}>
+                    <Activity size={18} className="flex-shrink-0" />
+                    <span className="hidden sm:inline">Monitoring</span>
+                    <span className="sm:hidden">Live</span>
+                  </Link>
+                )}
                 {isAdmin && (
                   <>
-                    <Link to="/assets" className={linkClass(location.pathname === '/assets')}>
-                      <Activity size={18} className="flex-shrink-0" />
-                      <span className="hidden sm:inline">Assets</span>
-                      <span className="sm:hidden">Assets</span>
-                    </Link>
                     <Link to="/chat" className={linkClass(location.pathname === '/chat')}>
                       <MessageSquare size={18} className="flex-shrink-0" />
                       <span className="hidden sm:inline">AI Insights</span>

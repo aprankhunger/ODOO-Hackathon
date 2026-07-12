@@ -84,6 +84,7 @@ function App() {
 
   const isAdmin = user.role === 'admin';
   const isTechnician = user.role === 'technician';
+  const isManager = ['admin', 'department_head', 'asset_manager'].includes(user.role);
 
   return (
     <Layout user={user} onLogout={handleLogout}>
@@ -102,7 +103,7 @@ function App() {
             <Route path="/assets" element={<Assets user={user} />} />
             <Route path="/audits" element={<Audits user={user} />} />
             <Route path="/reports" element={<Reports user={user} />} />
-            {isAdmin && <Route path="/fleet-overview" element={<Fleet />} />}
+            {isManager && <Route path="/fleet-overview" element={<Fleet />} />}
             {isAdmin && <Route path="/chat" element={<Chatbot />} />}
             {isAdmin && <Route path="/activity" element={<ActivityLog />} />}
             {isAdmin && <Route path="/organization" element={<Organization user={user} />} />}

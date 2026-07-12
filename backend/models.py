@@ -11,8 +11,11 @@ class Asset(Base):
     hostname = Column(String, nullable=True)
     os_name = Column(String, nullable=True)
     registered_at = Column(DateTime, default=datetime.utcnow)
+    owner_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    asset_item_id = Column(Integer, ForeignKey("asset_items.id"), nullable=True)
     
     telemetry = relationship("Telemetry", back_populates="asset")
+    owner = relationship("User", foreign_keys=[owner_user_id])
 
 class Telemetry(Base):
     __tablename__ = "telemetry"

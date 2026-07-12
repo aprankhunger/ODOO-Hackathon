@@ -44,6 +44,52 @@ def get_device_id():
 
 DEVICE_ID = get_device_id()
 
+# Session token of the signed-in IntelliAsset user (set by login()).
+AUTH_TOKEN = None
+
+def login():
+    """Sign in with an IntelliAsset account (employee, manager, or admin).
+
+    Credentials can be provided via INTELLIASSET_EMAIL / INTELLIASSET_PASSWORD
+    environment variables, or interactively at the prompt.
+    """
+    global AUTH_TOKEN
+    import getpass
+
+    email = os.getenv("INTELLIASSET_EMAIL")
+    password = os.getenv("INTELLIASSET_PASSWORD")
+
+    while True:
+        if not email:
+            email = input("IntelliAsset email: ").strip()
+        if not password:
+            password = getpass.getpass("IntelliAsset password: ")
+        try:
+            res = requests.post(
+                f"{CENTRAL_BACKEND_URL}/api/auth/login",
+                json={"email": email, "password": password},
+                timeout=15,
+            )
+        except Exception as e:
+            print(f"Could not reach backend at {CENTRAL_BACKEND_URL}: {e}")
+            time.sleep(5)
+            continue
+
+        if res.status_code == 200:
+            data = res.json()
+            AUTH_TOKEN = data["token"]
+            user = data.get("user", {})
+            print(f"Signed in as {user.get('name')} ({user.get('role')}). This device will be enrolled under your account.")
+            return
+        else:
+            try:
+                detail = res.json().get("detail", "Login failed")
+            except Exception:
+                detail = "Login failed"
+            print(f"Login failed: {detail}")
+            email = None
+            password = None
+
 def register_asset():
     try:
         payload = {
@@ -51,8 +97,18 @@ def register_asset():
             "hostname": platform.node(),
             "os_name": f"{platform.system()} {platform.release()}"
         }
-        res = requests.post(f"{CENTRAL_BACKEND_URL}/api/assets/register", json=payload)
-        print(f"Registration: {res.json()}")
+        res = requests.post(
+            f"{CENTRAL_BACKEND_URL}/api/assets/register",
+            json=payload,
+            headers={"Authorization": f"Bearer {AUTH_TOKEN}"},
+            timeout=15,
+        )
+        data = res.json()
+        if res.status_code == 200:
+            tag = data.get("asset_tag")
+            print(f"Enrollment: {data.get('message')}" + (f" — asset tag {tag}" if tag else ""))
+        else:
+            print(f"Enrollment failed: {data.get('detail', data)}")
     except Exception as e:
         print(f"Failed to register asset: {e}")
 
@@ -234,7 +290,8 @@ async def stream_telemetry():
 
 async def main():
     print(f"Starting IntelliAsset Agent (Device ID: {DEVICE_ID})")
-    # Register with backend
+    # Sign in with an IntelliAsset account, then enroll this device
+    await asyncio.to_thread(login)
     register_asset()
     
     # Init cpu percent
