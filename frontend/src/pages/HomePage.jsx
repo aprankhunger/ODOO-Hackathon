@@ -2,10 +2,17 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronRight, Play, Zap, BarChart3, Users, Truck, Brain, Terminal, Cpu, HardDrive, Activity } from 'lucide-react';
 
+const GITHUB_REPO = 'https://github.com/aprankhunger/ODOO-Hackathon';
+
 export default function HomePage() {
   const navigate = useNavigate();
   const [scrollY, setScrollY] = useState(0);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+
+  const scrollToSection = (id) => {
+    const element = document.getElementById(id);
+    if (element) element.scrollIntoView({ behavior: 'smooth' });
+  };
 
   useEffect(() => {
     const handleScroll = () => setScrollY(window.scrollY);
@@ -120,11 +127,11 @@ export default function HomePage() {
               <ChevronRight className="inline ml-2 group-hover:translate-x-1 transition-transform" size={20} />
             </button>
             <button 
-              onClick={() => navigate('/login')}
+              onClick={() => scrollToSection('agent')}
               className="group btn-bauhaus bg-surface border-ink text-ink px-8 py-4 text-lg font-bold uppercase flex items-center justify-center gap-2 hover:shadow-bauhaus transition-shadow cursor-pointer"
             >
               <Play size={20} />
-              Try Dashboard
+              See How It Works
             </button>
           </div>
 
@@ -148,7 +155,7 @@ export default function HomePage() {
       </section>
 
       {/* AI AGENT USP SECTION */}
-      <section className="relative py-24 px-4 bg-primary/5">
+      <section id="agent" className="relative py-24 px-4 bg-primary/5">
         <div className="max-w-6xl mx-auto">
           <div className="grid md:grid-cols-2 gap-12 items-center">
             {/* Left: Text Content */}
@@ -182,16 +189,15 @@ Connected! Streaming telemetry...`}</code>
                 </div>
               </div>
 
-              <button 
-                onClick={() => {
-                  const element = document.getElementById('agent-docs');
-                  if (element) element.scrollIntoView({ behavior: 'smooth' });
-                }}
-                className="btn-bauhaus bg-ink text-surface px-6 py-3 font-bold uppercase text-sm flex items-center gap-2 hover:shadow-bauhaus transition-shadow cursor-pointer"
+              <a 
+                href={`${GITHUB_REPO}/tree/main/agent`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn-bauhaus bg-ink text-surface px-6 py-3 font-bold uppercase text-sm inline-flex items-center gap-2 hover:shadow-bauhaus transition-shadow cursor-pointer"
               >
                 <Terminal size={18} />
                 View Agent Docs
-              </button>
+              </a>
             </div>
 
             {/* Right: Terminal Visual */}
@@ -225,7 +231,7 @@ Connected! Streaming telemetry...`}</code>
       </section>
 
       {/* FEATURES SECTION */}
-      <section className="relative py-24 px-4">
+      <section id="features" className="relative py-24 px-4">
         <div className="max-w-6xl mx-auto">
           <div className="text-center mb-16">
             <div className="inline-block mb-4 px-3 py-1 border-2 border-ink bg-accentYellow shadow-bauhaus-sm">
@@ -287,15 +293,17 @@ Connected! Streaming telemetry...`}</code>
               onClick={() => navigate('/login')}
               className="btn-bauhaus bg-accentYellow text-ink px-8 py-4 text-lg font-bold uppercase border-2 border-accentYellow hover:shadow-bauhaus transition-shadow cursor-pointer"
             >
-              Access Dashboard
+              Enter Dashboard
               <ChevronRight className="inline ml-2" size={20} />
             </button>
-            <button 
-              onClick={() => navigate('/')}
-              className="btn-bauhaus bg-transparent border-2 border-surface text-surface px-8 py-4 text-lg font-bold uppercase hover:bg-surface hover:text-ink cursor-pointer"
+            <a 
+              href={GITHUB_REPO}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn-bauhaus bg-transparent border-2 border-surface text-surface px-8 py-4 text-lg font-bold uppercase hover:bg-surface hover:text-ink cursor-pointer inline-flex items-center justify-center"
             >
-              View Docs
-            </button>
+              View on GitHub
+            </a>
           </div>
         </div>
       </section>
@@ -303,39 +311,51 @@ Connected! Streaming telemetry...`}</code>
       {/* FOOTER */}
       <footer className="relative py-12 px-4 bg-background border-t-2 border-ink">
         <div className="max-w-6xl mx-auto">
-          <div className="grid md:grid-cols-4 gap-8 mb-12">
+          <div className="grid md:grid-cols-3 gap-8 mb-12">
             <div>
               <h3 className="font-display font-black text-lg uppercase mb-4">IntelliAsset</h3>
               <p className="text-sm text-muted">Intelligent asset management for the modern enterprise.</p>
             </div>
             
             <div>
-              <h4 className="font-bold uppercase text-xs tracking-widest mb-4 text-ink">Product</h4>
+              <h4 className="font-bold uppercase text-xs tracking-widest mb-4 text-ink">Explore</h4>
               <ul className="space-y-2 text-sm text-muted">
-                <li><a href="#" className="hover:text-ink transition">Features</a></li>
-                <li><a href="#" className="hover:text-ink transition">Pricing</a></li>
-                <li><a href="#" className="hover:text-ink transition">Documentation</a></li>
-                <li><a href="#" className="hover:text-ink transition">API</a></li>
+                <li>
+                  <button onClick={() => scrollToSection('features')} className="hover:text-ink transition cursor-pointer">
+                    Features
+                  </button>
+                </li>
+                <li>
+                  <button onClick={() => scrollToSection('agent')} className="hover:text-ink transition cursor-pointer">
+                    Agent Monitoring
+                  </button>
+                </li>
+                <li>
+                  <button onClick={() => navigate('/login')} className="hover:text-ink transition cursor-pointer">
+                    Dashboard Login
+                  </button>
+                </li>
               </ul>
             </div>
 
             <div>
-              <h4 className="font-bold uppercase text-xs tracking-widest mb-4 text-ink">Company</h4>
+              <h4 className="font-bold uppercase text-xs tracking-widest mb-4 text-ink">Resources</h4>
               <ul className="space-y-2 text-sm text-muted">
-                <li><a href="#" className="hover:text-ink transition">About</a></li>
-                <li><a href="#" className="hover:text-ink transition">Blog</a></li>
-                <li><a href="#" className="hover:text-ink transition">Careers</a></li>
-                <li><a href="#" className="hover:text-ink transition">Contact</a></li>
-              </ul>
-            </div>
-
-            <div>
-              <h4 className="font-bold uppercase text-xs tracking-widest mb-4 text-ink">Legal</h4>
-              <ul className="space-y-2 text-sm text-muted">
-                <li><a href="#" className="hover:text-ink transition">Privacy</a></li>
-                <li><a href="#" className="hover:text-ink transition">Terms</a></li>
-                <li><a href="#" className="hover:text-ink transition">Security</a></li>
-                <li><a href="#" className="hover:text-ink transition">Compliance</a></li>
+                <li>
+                  <a href={GITHUB_REPO} target="_blank" rel="noopener noreferrer" className="hover:text-ink transition">
+                    GitHub Repository
+                  </a>
+                </li>
+                <li>
+                  <a href={`${GITHUB_REPO}/tree/main/agent`} target="_blank" rel="noopener noreferrer" className="hover:text-ink transition">
+                    Agent Setup Guide
+                  </a>
+                </li>
+                <li>
+                  <a href={`${GITHUB_REPO}#readme`} target="_blank" rel="noopener noreferrer" className="hover:text-ink transition">
+                    Documentation
+                  </a>
+                </li>
               </ul>
             </div>
           </div>
@@ -349,9 +369,9 @@ Connected! Streaming telemetry...`}</code>
                 Designed & Built by <span className="uppercase">Apran Khunger</span>
               </p>
               <div className="flex gap-4 mt-4 md:mt-0">
-                <a href="#" className="text-ink hover:text-primary transition">GitHub</a>
-                <a href="#" className="text-ink hover:text-primary transition">Twitter</a>
-                <a href="#" className="text-ink hover:text-primary transition">LinkedIn</a>
+                <a href={GITHUB_REPO} target="_blank" rel="noopener noreferrer" className="text-ink hover:text-primary transition font-bold">
+                  GitHub
+                </a>
               </div>
             </div>
           </div>
