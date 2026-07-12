@@ -172,7 +172,7 @@ def assign_technician(req: AssignRequest, db: Session = Depends(get_db)):
             """
             
             response = gemini_client.models.generate_content(
-                model='gemini-2.0-flash',
+                model='gemini-1.5-flash',
                 contents=prompt
             )
             ai_report = response.text
@@ -260,7 +260,7 @@ def chatbot_interaction(req: ChatRequest, db: Session = Depends(get_db)):
             """
             
             response = gemini_client.models.generate_content(
-                model='gemini-2.0-flash',
+                model='gemini-1.5-flash',
                 contents=prompt
             )
             reply = response.text
