@@ -3,31 +3,62 @@
 @tailwind utilities;
 
 @layer base {
+  html {
+    @apply bg-background;
+  }
   body {
-    @apply bg-background text-white antialiased selection:bg-primary selection:text-white;
+    @apply bg-background text-ink antialiased selection:bg-accentYellow selection:text-ink;
   }
 }
 
 @layer utilities {
+  /* Bauhaus guide grid background */
+  .guide-grid {
+    background-image:
+      linear-gradient(to right, rgba(25, 25, 25, 0.06) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(25, 25, 25, 0.06) 1px, transparent 1px);
+    background-size: 48px 48px;
+  }
+
+  /* Bauhaus flat card: sharp border + hard offset shadow, no blur */
   .glass {
-    @apply bg-surface backdrop-blur-md border border-border;
+    @apply bg-surface border-2 border-ink;
   }
   .glass-card {
-    @apply bg-surface hover:bg-surfaceHover backdrop-blur-md border border-border rounded-2xl shadow-xl transition-all duration-300;
+    @apply bg-surface border-2 border-ink rounded-none shadow-bauhaus transition-transform duration-200;
   }
+  .glass-card:hover {
+    transform: translate(-1px, -1px);
+    box-shadow: 5px 5px 0 0 #191919;
+  }
+
   .glow-primary {
-    box-shadow: 0 0 40px -10px var(--tw-colors-primary-glow);
+    box-shadow: 4px 4px 0 0 #1E4FD8;
   }
   .glow-success {
-    box-shadow: 0 0 40px -10px var(--tw-colors-success-glow);
+    box-shadow: 4px 4px 0 0 #1B8A50;
   }
   .glow-warning {
-    box-shadow: 0 0 40px -10px var(--tw-colors-warning-glow);
+    box-shadow: 4px 4px 0 0 #E8A200;
   }
   .glow-danger {
-    box-shadow: 0 0 40px -10px var(--tw-colors-danger-glow);
+    box-shadow: 4px 4px 0 0 #D8341E;
   }
+
   .text-gradient {
-    @apply bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-indigo-500;
+    @apply text-primary;
+  }
+
+  /* Hard-edged Bauhaus button */
+  .btn-bauhaus {
+    @apply border-2 border-ink rounded-none shadow-bauhaus-sm font-bold uppercase tracking-wide transition-all duration-150;
+  }
+  .btn-bauhaus:hover:not(:disabled) {
+    transform: translate(-1px, -1px);
+    box-shadow: 3px 3px 0 0 #191919;
+  }
+  .btn-bauhaus:active:not(:disabled) {
+    transform: translate(2px, 2px);
+    box-shadow: 0 0 0 0 #191919;
   }
 }
