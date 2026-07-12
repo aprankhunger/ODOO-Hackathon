@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Shield, Wrench, ArrowRight, Lock, UserPlus, KeyRound } from 'lucide-react';
+import { Shield, Wrench, ArrowRight, Lock, UserPlus, KeyRound, Home } from 'lucide-react';
 
 const API = 'http://localhost:8001';
 
@@ -9,6 +10,7 @@ const inputClass =
 const labelClass = 'block text-xs font-bold uppercase tracking-widest text-ink mb-1.5';
 
 const Login = ({ onLogin }) => {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('signin'); // signin | signup | technician
   const [mode, setMode] = useState('form'); // form | forgot | reset
   const [error, setError] = useState('');
@@ -135,6 +137,15 @@ const Login = ({ onLogin }) => {
 
   return (
     <div className="min-h-screen bg-bg guide-grid flex items-center justify-center p-4 relative overflow-hidden">
+      {/* Home Button */}
+      <button
+        onClick={() => navigate('/')}
+        className="absolute top-4 left-4 flex items-center gap-2 px-3 py-2 bg-surface border-2 border-ink rounded-none shadow-bauhaus-sm hover:shadow-bauhaus-sm font-bold text-xs uppercase tracking-wide transition-all"
+        aria-label="Back to home"
+      >
+        <Home size={16} />
+        <span>Home</span>
+      </button>
       {/* Hanging decorative geometry */}
       <div className="hidden md:block absolute top-0 left-[18%] pointer-events-none" aria-hidden="true">
         <div className="w-px h-40 bg-ink mx-auto"></div>

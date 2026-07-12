@@ -1,10 +1,11 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import Fleet from './pages/Fleet';
 import Chatbot from './pages/Chatbot';
 import Login from './pages/Login';
+import HomePage from './pages/HomePage';
 import TechnicianDashboard from './pages/TechnicianDashboard';
 import ActivityLog from './pages/ActivityLog';
 import Organization from './pages/Organization';
@@ -72,40 +73,44 @@ function App() {
   }
 
   if (!user) {
-    return <Login onLogin={setUser} />;
+    return (
+      <Routes>
+        <Route path="/" element={<HomePage />} />
+        <Route path="/login" element={<Login onLogin={setUser} />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    );
   }
 
   const isAdmin = user.role === 'admin';
   const isTechnician = user.role === 'technician';
 
   return (
-    <Router>
-      <Layout user={user} onLogout={handleLogout}>
-        <Routes>
-          {isTechnician ? (
-            <>
-              <Route path="/" element={<TechnicianDashboard user={user} />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </>
-          ) : (
-            <>
-              <Route path="/" element={<Dashboard user={user} />} />
-              <Route path="/allocations" element={<Allocations user={user} />} />
-              <Route path="/bookings" element={<Bookings user={user} />} />
-              <Route path="/maintenance" element={<Maintenance user={user} />} />
-              <Route path="/assets" element={<Assets user={user} />} />
-              <Route path="/audits" element={<Audits user={user} />} />
-              <Route path="/reports" element={<Reports user={user} />} />
-              {isAdmin && <Route path="/fleet" element={<Fleet />} />}
-              {isAdmin && <Route path="/chat" element={<Chatbot />} />}
-              {isAdmin && <Route path="/activity" element={<ActivityLog />} />}
-              {isAdmin && <Route path="/organization" element={<Organization user={user} />} />}
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </>
-          )}
-        </Routes>
-      </Layout>
-    </Router>
+    <Layout user={user} onLogout={handleLogout}>
+      <Routes>
+        {isTechnician ? (
+          <>
+            <Route path="/" element={<TechnicianDashboard user={user} />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </>
+        ) : (
+          <>
+            <Route path="/" element={<Dashboard user={user} />} />
+            <Route path="/allocations" element={<Allocations user={user} />} />
+            <Route path="/bookings" element={<Bookings user={user} />} />
+            <Route path="/maintenance" element={<Maintenance user={user} />} />
+            <Route path="/assets" element={<Assets user={user} />} />
+            <Route path="/audits" element={<Audits user={user} />} />
+            <Route path="/reports" element={<Reports user={user} />} />
+            {isAdmin && <Route path="/fleet" element={<Fleet />} />}
+            {isAdmin && <Route path="/chat" element={<Chatbot />} />}
+            {isAdmin && <Route path="/activity" element={<ActivityLog />} />}
+            {isAdmin && <Route path="/organization" element={<Organization user={user} />} />}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </>
+        )}
+      </Routes>
+    </Layout>
   );
 }
 

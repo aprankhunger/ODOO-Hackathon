@@ -50,11 +50,33 @@ export default {
           '0%, 100%': { transform: 'translateY(0px)' },
           '50%': { transform: 'translateY(-6px)' },
         },
+        slideUp: {
+          from: {
+            opacity: '0',
+            transform: 'translateY(30px)',
+          },
+          to: {
+            opacity: '1',
+            transform: 'translateY(0)',
+          },
+        },
+        fadeInUp: {
+          from: {
+            opacity: '0',
+            transform: 'translateY(20px)',
+          },
+          to: {
+            opacity: '1',
+            transform: 'translateY(0)',
+          },
+        },
       },
       animation: {
         sway: 'sway 5s ease-in-out infinite',
         'sway-slow': 'sway 8s ease-in-out infinite',
         'float-y': 'float-y 6s ease-in-out infinite',
+        slideUp: 'slideUp 0.6s ease-out forwards',
+        fadeInUp: 'fadeInUp 0.6s ease-out forwards',
       },
     },
   },
