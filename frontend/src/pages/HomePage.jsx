@@ -363,7 +363,7 @@ Connected! Streaming telemetry...`}</code>
           <div className="border-t-2 border-ink pt-8">
             <div className="flex flex-col md:flex-row items-center justify-between">
               <p className="text-sm text-muted">
-                © 2024 IntelliAsset. All rights reserved.
+                © 2026 IntelliAsset. All rights reserved.
               </p>
               <p className="text-sm font-bold text-primary mt-4 md:mt-0">
                 Designed & Built by <span className="uppercase">Apran Khunger</span>
