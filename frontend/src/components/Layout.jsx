@@ -1,73 +1,66 @@
 import React from 'react';
-import { Outlet, NavLink } from 'react-router-dom';
-import { LayoutDashboard, MessageSquareText, Activity, Server, Settings } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { Link, useLocation } from 'react-router-dom';
+import { Activity, MessageSquare, Menu, LogOut, Shield, Wrench } from 'lucide-react';
 
-const Layout = () => {
-  const navItems = [
-    { name: 'Dashboard', path: '/', icon: LayoutDashboard },
-    { name: 'Assets', path: '/assets', icon: Server },
-    { name: 'Predictive Health', path: '/health', icon: Activity },
-    { name: 'AI Assistant', path: '/chat', icon: MessageSquareText },
-    { name: 'Settings', path: '/settings', icon: Settings },
-  ];
+const Layout = ({ children, user, onLogout }) => {
+  const location = useLocation();
+  const isAdmin = user?.role === 'admin';
 
   return (
-    <div className="flex h-screen w-full bg-background overflow-hidden font-sans text-white">
-      {/* Sidebar */}
-      <motion.aside 
-        initial={{ x: -250 }}
-        animate={{ x: 0 }}
-        transition={{ duration: 0.5, ease: "easeOut" }}
-        className="w-64 h-full glass border-r border-border flex flex-col z-10"
-      >
-        <div className="p-6 flex items-center space-x-3">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-blue-500 to-indigo-500 flex items-center justify-center shadow-lg shadow-blue-500/30">
-            <Activity size={18} className="text-white" />
-          </div>
-          <h1 className="text-xl font-bold tracking-tight">IntelliAsset<span className="text-primary">AI</span></h1>
-        </div>
-
-        <nav className="flex-1 px-4 py-4 space-y-2">
-          {navItems.map((item) => (
-            <NavLink
-              key={item.path}
-              to={item.path}
-              className={({ isActive }) =>
-                `flex items-center space-x-3 px-4 py-3 rounded-xl transition-all duration-300 ${
-                  isActive 
-                    ? 'bg-primary/10 text-primary border border-primary/20 glow-primary font-medium' 
-                    : 'text-gray-400 hover:text-white hover:bg-surfaceHover'
-                }`
-              }
-            >
-              <item.icon size={20} />
-              <span>{item.name}</span>
-            </NavLink>
-          ))}
-        </nav>
-
-        <div className="p-4 mt-auto">
-          <div className="glass-card p-4 rounded-xl flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-full bg-gray-800 flex items-center justify-center border border-gray-700">
-              <span className="text-sm font-semibold">IT</span>
+    <div className="min-h-screen bg-bg text-text flex flex-col md:flex-row">
+      {/* Sidebar Navigation */}
+      <nav className="w-full md:w-64 bg-surface/50 backdrop-blur-xl border-b md:border-b-0 md:border-r border-border p-4 flex flex-col justify-between">
+        <div>
+          <div className="flex items-center space-x-3 mb-8 px-2 mt-4">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-purple-600 flex items-center justify-center shadow-lg shadow-primary/20">
+              <Activity size={18} className="text-white" />
             </div>
-            <div>
-              <p className="text-sm font-medium">IT Admin</p>
-              <p className="text-xs text-gray-500">System Manager</p>
+            <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-500">
+              IntelliAsset
+            </h1>
+          </div>
+          
+          <div className="mb-6 px-2">
+            <div className={`text-xs font-bold uppercase tracking-wider mb-2 flex items-center ${isAdmin ? 'text-primary' : 'text-purple-500'}`}>
+              {isAdmin ? <><Shield size={14} className="mr-1"/> Admin Mode</> : <><Wrench size={14} className="mr-1"/> Technician Mode</>}
             </div>
           </div>
+
+          <div className="space-y-2">
+            {isAdmin ? (
+              <>
+                <Link to="/" className={`flex items-center space-x-3 px-4 py-3 rounded-xl transition-all ${location.pathname === '/' ? 'bg-primary text-white shadow-lg shadow-blue-500/20' : 'text-gray-400 hover:bg-surfaceHover hover:text-white'}`}>
+                  <Activity size={20} />
+                  <span className="font-medium">Fleet Dashboard</span>
+                </Link>
+                <Link to="/chat" className={`flex items-center space-x-3 px-4 py-3 rounded-xl transition-all ${location.pathname === '/chat' ? 'bg-primary text-white shadow-lg shadow-blue-500/20' : 'text-gray-400 hover:bg-surfaceHover hover:text-white'}`}>
+                  <MessageSquare size={20} />
+                  <span className="font-medium">AI Insights</span>
+                </Link>
+              </>
+            ) : (
+              <Link to="/" className={`flex items-center space-x-3 px-4 py-3 rounded-xl transition-all ${location.pathname === '/' ? 'bg-purple-600 text-white shadow-lg shadow-purple-500/20' : 'text-gray-400 hover:bg-surfaceHover hover:text-white'}`}>
+                <Wrench size={20} />
+                <span className="font-medium">My Tickets</span>
+              </Link>
+            )}
+          </div>
         </div>
-      </motion.aside>
 
-      {/* Main Content */}
-      <main className="flex-1 h-full overflow-y-auto relative">
-        {/* Ambient Background Gradient */}
-        <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-primary/20 rounded-full blur-[120px] -z-10 opacity-50 pointer-events-none"></div>
-        <div className="absolute bottom-0 right-1/4 w-[400px] h-[400px] bg-indigo-500/10 rounded-full blur-[100px] -z-10 opacity-50 pointer-events-none"></div>
+        <button 
+          onClick={onLogout}
+          className="mt-auto flex items-center space-x-3 px-4 py-3 rounded-xl text-gray-400 hover:bg-danger/10 hover:text-danger transition-colors text-left"
+        >
+          <LogOut size={20} />
+          <span className="font-medium">Log out</span>
+        </button>
+      </nav>
 
-        <div className="p-8">
-          <Outlet />
+      {/* Main Content Area */}
+      <main className="flex-1 p-4 md:p-8 overflow-y-auto relative">
+        <div className="absolute top-0 left-0 w-full h-96 bg-gradient-to-b from-primary/5 to-transparent pointer-events-none"></div>
+        <div className="max-w-7xl mx-auto relative z-10">
+          {children}
         </div>
       </main>
     </div>
