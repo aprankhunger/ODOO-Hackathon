@@ -30,3 +30,14 @@ class Telemetry(Base):
     detailed_metrics = Column(JSON, nullable=True) 
     
     asset = relationship("Asset", back_populates="telemetry")
+
+class TechnicianCode(Base):
+    __tablename__ = "technician_codes"
+    
+    code = Column(String, primary_key=True, index=True)
+    device_id = Column(String, ForeignKey("assets.device_id"))
+    ai_report = Column(String)
+    priority = Column(Integer, default=3)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    asset = relationship("Asset")
