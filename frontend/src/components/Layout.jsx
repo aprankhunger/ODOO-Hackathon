@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Activity, MessageSquare, LogOut, Shield, Wrench } from 'lucide-react';
+import { Activity, MessageSquare, LogOut, Shield, Wrench, BellRing } from 'lucide-react';
+import NotificationBell from './NotificationBell';
 
 // A hanging pendulum: string + shape sway together from the top anchor
 const Hanger = ({ left, stringH, swayClass, children }) => (
@@ -60,6 +61,11 @@ const Layout = ({ children, user, onLogout }) => {
                   <span className="hidden sm:inline">AI Insights</span>
                   <span className="sm:hidden">AI</span>
                 </Link>
+                <Link to="/activity" className={linkClass(location.pathname === '/activity')}>
+                  <BellRing size={18} className="flex-shrink-0" />
+                  <span className="hidden sm:inline">Activity</span>
+                  <span className="sm:hidden">Log</span>
+                </Link>
               </>
             ) : (
               <Link to="/" className={linkClass(location.pathname === '/', 'bg-accentYellow text-ink')}>
@@ -84,13 +90,18 @@ const Layout = ({ children, user, onLogout }) => {
           </div>
         </div>
 
-        <button
-          onClick={onLogout}
-          className="md:mt-auto flex items-center gap-2 md:gap-3 px-3 md:px-4 py-2.5 md:py-3 border-2 border-ink bg-surface text-ink font-bold uppercase text-xs md:text-sm tracking-wide hover:bg-danger hover:text-white transition-colors text-left flex-shrink-0"
-        >
-          <LogOut size={18} className="flex-shrink-0" />
-          <span className="hidden sm:inline">Log out</span>
-        </button>
+        <div className="md:mt-auto flex flex-row md:flex-col items-center md:items-stretch gap-3 flex-shrink-0">
+          <div className="flex md:justify-start">
+            <NotificationBell role={user?.role || 'admin'} />
+          </div>
+          <button
+            onClick={onLogout}
+            className="flex items-center gap-2 md:gap-3 px-3 md:px-4 py-2.5 md:py-3 border-2 border-ink bg-surface text-ink font-bold uppercase text-xs md:text-sm tracking-wide hover:bg-danger hover:text-white transition-colors text-left flex-shrink-0"
+          >
+            <LogOut size={18} className="flex-shrink-0" />
+            <span className="hidden sm:inline">Log out</span>
+          </button>
+        </div>
       </nav>
 
       {/* Main Content Area */}

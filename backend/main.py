@@ -6,11 +6,11 @@ import json
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
-from database import engine, get_db
-from models import Asset, Telemetry, TechnicianCode, Base
+from database import engine, get_db, SessionLocal
+from models import Asset, Telemetry, TechnicianCode, Notification, AuditLog, Base
 from pydantic import BaseModel
 
 try:
@@ -43,6 +43,102 @@ app.add_middleware(
 
 dashboard_connections = []
 
+# ---------------------------------------------------------------------------
+# Notifications & Audit Log helpers
+# ---------------------------------------------------------------------------
+
+def log_action(db: Session, actor: str, actor_role: str, action: str, target: str = None, details: str = None):
+    """Insert a row into the audit log."""
+    entry = AuditLog(actor=actor, actor_role=actor_role, action=action, target=target, details=details)
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+    return entry
+
+def serialize_notification(n: Notification):
+    return {
+        "id": n.id,
+        "recipient_role": n.recipient_role,
+        "type": n.type,
+        "title": n.title,
+        "message": n.message,
+        "severity": n.severity,
+        "is_read": n.is_read,
+        "created_at": n.created_at.isoformat() if n.created_at else None,
+    }
+
+async def create_notification(db: Session, recipient_role: str, type: str, title: str, message: str, severity: str = "info"):
+    """Insert a notification and broadcast it live to all dashboard WebSocket clients."""
+    notif = Notification(
+        recipient_role=recipient_role,
+        type=type,
+        title=title,
+        message=message,
+        severity=severity,
+    )
+    db.add(notif)
+    db.commit()
+    db.refresh(notif)
+
+    payload = {"event": "notification", "notification": serialize_notification(notif)}
+    for conn in list(dashboard_connections):
+        try:
+            await conn.send_json(payload)
+        except Exception:
+            pass
+    return notif
+
+def seed_activity_data():
+    """Seed realistic demo notifications and audit logs if the tables are empty."""
+    db = SessionLocal()
+    try:
+        if db.query(Notification).first() is not None:
+            return
+
+        now = datetime.utcnow()
+
+        demo_notifications = [
+            ("all", "asset_assigned", "Asset Assigned", 'MacBook Pro 16" (AF-0114) has been assigned to Priya Sharma (Engineering).', "info", True, now - timedelta(days=3, hours=4)),
+            ("admin", "maintenance_approved", "Maintenance Approved", "Maintenance request MR-2041 for Dell Latitude 7440 (AF-0087) approved by Manager Raj Patel.", "success", True, now - timedelta(days=2, hours=9)),
+            ("admin", "maintenance_rejected", "Maintenance Rejected", "Maintenance request MR-2043 for HP EliteBook (AF-0102) rejected: duplicate of MR-2041.", "warning", True, now - timedelta(days=2, hours=6)),
+            ("all", "booking_confirmed", "Booking Confirmed", "Conference Projector (AF-0230) booked by Ananya Iyer for Jul 14, 10:00-12:00.", "success", False, now - timedelta(days=1, hours=20)),
+            ("all", "booking_cancelled", "Booking Cancelled", "Booking BK-3312 for Canon DSLR Kit (AF-0198) cancelled by Vikram Rao.", "warning", True, now - timedelta(days=1, hours=12)),
+            ("admin", "transfer_approved", "Transfer Approved", "Transfer TR-0561: Lenovo ThinkPad X1 (AF-0075) moved from Mumbai HQ to Bengaluru Office.", "success", False, now - timedelta(days=1, hours=3)),
+            ("all", "booking_reminder", "Booking Reminder", "Reminder: Conference Projector (AF-0230) booking starts in 1 hour (Ananya Iyer).", "info", False, now - timedelta(hours=8)),
+            ("admin", "overdue_return", "Overdue Return Alert", 'iPad Pro 12.9" (AF-0156) checked out to Karan Mehta is 3 days overdue for return.', "danger", False, now - timedelta(hours=5)),
+            ("admin", "audit_discrepancy", "Audit Discrepancy Flagged", "Quarterly audit: Logitech MX Master (AF-0301) not found at recorded location (Desk 42, Floor 3).", "danger", False, now - timedelta(hours=2)),
+            ("technician", "asset_assigned", "New Repair Ticket", "You have been assigned a repair ticket for Dell Latitude 7440 (AF-0087) — Priority: High.", "warning", False, now - timedelta(hours=1)),
+        ]
+        for role, ntype, title, message, severity, is_read, created in demo_notifications:
+            db.add(Notification(recipient_role=role, type=ntype, title=title, message=message, severity=severity, is_read=is_read, created_at=created))
+
+        demo_logs = [
+            ("admin", "admin", "LOGIN", None, "Admin signed in to IntelliAsset Central.", now - timedelta(days=3, hours=5)),
+            ("admin", "admin", "ASSET_REGISTERED", "AF-0114", 'Registered MacBook Pro 16" — Engineering pool.', now - timedelta(days=3, hours=4, minutes=30)),
+            ("admin", "admin", "ASSET_ASSIGNED", "AF-0114", "Assigned to Priya Sharma (Engineering).", now - timedelta(days=3, hours=4)),
+            ("priya.sharma", "employee", "MAINTENANCE_REQUESTED", "AF-0087", "Reported: Dell Latitude 7440 battery drains within 1 hour.", now - timedelta(days=2, hours=11)),
+            ("raj.patel", "manager", "MAINTENANCE_APPROVED", "AF-0087", "Approved maintenance request MR-2041.", now - timedelta(days=2, hours=9)),
+            ("raj.patel", "manager", "MAINTENANCE_REJECTED", "AF-0102", "Rejected MR-2043 — duplicate of MR-2041.", now - timedelta(days=2, hours=6)),
+            ("ananya.iyer", "employee", "BOOKING_CREATED", "AF-0230", "Booked Conference Projector for Jul 14, 10:00-12:00.", now - timedelta(days=1, hours=20)),
+            ("vikram.rao", "employee", "BOOKING_CANCELLED", "AF-0198", "Cancelled booking BK-3312 for Canon DSLR Kit.", now - timedelta(days=1, hours=12)),
+            ("admin", "admin", "TRANSFER_APPROVED", "AF-0075", "Approved transfer TR-0561: Mumbai HQ → Bengaluru Office.", now - timedelta(days=1, hours=3)),
+            ("system", "system", "BOOKING_REMINDER_SENT", "AF-0230", "Sent booking start reminder to Ananya Iyer.", now - timedelta(hours=8)),
+            ("system", "system", "OVERDUE_FLAGGED", "AF-0156", 'iPad Pro 12.9" overdue by 3 days (Karan Mehta).', now - timedelta(hours=5)),
+            ("admin", "admin", "AUDIT_STARTED", None, "Started Q3 physical asset audit — Floor 3.", now - timedelta(hours=3)),
+            ("admin", "admin", "AUDIT_FLAGGED", "AF-0301", "Discrepancy: Logitech MX Master missing from Desk 42.", now - timedelta(hours=2)),
+            ("TECH-9QX2", "technician", "LOGIN", None, "Technician signed in with access code.", now - timedelta(hours=1, minutes=15)),
+            ("TECH-9QX2", "technician", "TICKET_VIEWED", "AF-0087", "Opened AI repair report for Dell Latitude 7440.", now - timedelta(hours=1)),
+        ]
+        for actor, role, action, target, details, created in demo_logs:
+            db.add(AuditLog(actor=actor, actor_role=role, action=action, target=target, details=details, created_at=created))
+
+        db.commit()
+        print("Seeded demo notifications and audit logs.")
+    finally:
+        db.close()
+
+seed_activity_data()
+
 class AssignRequest(BaseModel):
     device_id: str
 
@@ -63,7 +159,7 @@ async def websocket_dashboard(websocket: WebSocket):
         dashboard_connections.remove(websocket)
 
 @app.post("/api/assets/register")
-def register_asset(data: dict, db: Session = Depends(get_db)):
+async def register_asset(data: dict, db: Session = Depends(get_db)):
     device_id = data.get("device_id")
     if not device_id:
         return {"error": "device_id is required"}
@@ -72,13 +168,24 @@ def register_asset(data: dict, db: Session = Depends(get_db)):
     if existing_asset:
         return {"message": "Asset already registered", "device_id": device_id}
     
+    hostname = data.get("hostname", "Unknown Device")
     new_asset = Asset(
         device_id=device_id,
-        hostname=data.get("hostname", "Unknown Device"),
+        hostname=hostname,
         os_name=data.get("os_name", "Unknown OS")
     )
     db.add(new_asset)
     db.commit()
+
+    log_action(db, actor="system", actor_role="system", action="ASSET_REGISTERED", target=device_id, details=f"Registered {hostname}.")
+    await create_notification(
+        db,
+        recipient_role="admin",
+        type="asset_registered",
+        title="New Asset Registered",
+        message=f"{hostname} ({device_id}) joined the fleet.",
+        severity="info",
+    )
     
     return {"message": "Asset registered successfully", "device_id": device_id}
 
@@ -151,7 +258,7 @@ def get_asset_details(device_id: str, db: Session = Depends(get_db)):
     }
 
 @app.post("/api/admin/assign")
-def assign_technician(req: AssignRequest, db: Session = Depends(get_db)):
+async def assign_technician(req: AssignRequest, db: Session = Depends(get_db)):
     # 1. Fetch latest telemetry
     latest_telemetry = db.query(Telemetry).filter(Telemetry.device_id == req.device_id).order_by(Telemetry.timestamp.desc()).first()
     if not latest_telemetry:
@@ -212,6 +319,21 @@ def assign_technician(req: AssignRequest, db: Session = Depends(get_db)):
     )
     db.add(tech_ticket)
     db.commit()
+
+    asset = db.query(Asset).filter(Asset.device_id == req.device_id).first()
+    hostname = asset.hostname if asset else req.device_id
+    priority_label = {1: "High", 2: "Medium", 3: "Low"}.get(priority, "Low")
+    severity = {1: "danger", 2: "warning", 3: "info"}.get(priority, "info")
+
+    log_action(db, actor="admin", actor_role="admin", action="TECHNICIAN_ASSIGNED", target=req.device_id, details=f"Assigned code {code} for {hostname} — Priority: {priority_label}.")
+    await create_notification(
+        db,
+        recipient_role="all",
+        type="asset_assigned",
+        title="Technician Assigned",
+        message=f"Repair ticket created for {hostname} — Priority: {priority_label}. Access code: {code}.",
+        severity=severity,
+    )
     
     return {"message": "Technician assigned", "code": code, "priority": priority}
 
@@ -272,6 +394,8 @@ def technician_login(req: LoginRequest, db: Session = Depends(get_db)):
     tickets = db.query(TechnicianCode).filter(TechnicianCode.code == req.code).all()
     if not tickets:
         raise HTTPException(status_code=401, detail="Invalid Technician Code")
+
+    log_action(db, actor=req.code, actor_role="technician", action="LOGIN", target=None, details="Technician signed in with access code.")
     
     # Map tickets with asset info
     assigned_devices = []
@@ -335,6 +459,71 @@ def chatbot_interaction(req: ChatRequest, db: Session = Depends(get_db)):
             reply = f"AI Error: {str(e)}"
             
     return {"reply": reply}
+
+# ---------------------------------------------------------------------------
+# Notifications & Audit Log endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/notifications")
+def get_notifications(role: str = None, unread_only: bool = False, limit: int = 50, db: Session = Depends(get_db)):
+    query = db.query(Notification)
+    if role:
+        query = query.filter(Notification.recipient_role.in_([role, "all"]))
+    if unread_only:
+        query = query.filter(Notification.is_read == False)
+    notifications = query.order_by(Notification.created_at.desc()).limit(limit).all()
+
+    unread_query = db.query(Notification).filter(Notification.is_read == False)
+    if role:
+        unread_query = unread_query.filter(Notification.recipient_role.in_([role, "all"]))
+    unread_count = unread_query.count()
+
+    return {
+        "notifications": [serialize_notification(n) for n in notifications],
+        "unread_count": unread_count,
+    }
+
+@app.post("/api/notifications/{notification_id}/read")
+def mark_notification_read(notification_id: int, db: Session = Depends(get_db)):
+    notif = db.query(Notification).filter(Notification.id == notification_id).first()
+    if not notif:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    notif.is_read = True
+    db.commit()
+    return {"message": "Marked as read", "id": notification_id}
+
+@app.post("/api/notifications/read-all")
+def mark_all_notifications_read(db: Session = Depends(get_db)):
+    db.query(Notification).filter(Notification.is_read == False).update({"is_read": True})
+    db.commit()
+    return {"message": "All notifications marked as read"}
+
+@app.get("/api/audit-logs")
+def get_audit_logs(actor: str = None, action: str = None, limit: int = 100, db: Session = Depends(get_db)):
+    query = db.query(AuditLog)
+    if actor:
+        query = query.filter(AuditLog.actor.ilike(f"%{actor}%"))
+    if action:
+        query = query.filter(AuditLog.action == action)
+    logs = query.order_by(AuditLog.created_at.desc()).limit(limit).all()
+
+    action_types = [row[0] for row in db.query(AuditLog.action).distinct().all()]
+
+    return {
+        "logs": [
+            {
+                "id": l.id,
+                "actor": l.actor,
+                "actor_role": l.actor_role,
+                "action": l.action,
+                "target": l.target,
+                "details": l.details,
+                "created_at": l.created_at.isoformat() if l.created_at else None,
+            }
+            for l in logs
+        ],
+        "action_types": sorted(action_types),
+    }
 
 if __name__ == "__main__":
     import uvicorn
