@@ -5,6 +5,7 @@ import Dashboard from './pages/Dashboard';
 import Chatbot from './pages/Chatbot';
 import Login from './pages/Login';
 import TechnicianDashboard from './pages/TechnicianDashboard';
+import ActivityLog from './pages/ActivityLog';
 
 function App() {
   const [user, setUser] = useState(null); // { role: 'admin' | 'technician', devices: [] }
@@ -25,6 +26,7 @@ function App() {
             <>
               <Route path="/" element={<Dashboard />} />
               <Route path="/chat" element={<Chatbot />} />
+              <Route path="/activity" element={<ActivityLog />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </>
           ) : (

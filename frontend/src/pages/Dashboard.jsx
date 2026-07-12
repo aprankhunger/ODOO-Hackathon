@@ -21,6 +21,8 @@ const Dashboard = () => {
 
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
+      // Ignore non-telemetry broadcasts (e.g. live notification events)
+      if (data.event === 'notification' || !data.device_id || !data.telemetry) return;
       const { device_id, telemetry } = data;
 
       setDeviceMap(prev => ({
