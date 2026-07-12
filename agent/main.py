@@ -31,10 +31,62 @@ except ImportError:
     win32evtlog = None
     IS_WINDOWS = False
 
-# Set INTELLIASSET_BACKEND_URL to point the agent at a hosted backend,
-# e.g. INTELLIASSET_BACKEND_URL=https://api.yourdomain.com python main.py
-CENTRAL_BACKEND_URL = os.getenv("INTELLIASSET_BACKEND_URL", "http://localhost:8001")
+# ---------------------------------------------------------------------------
+# Backend URL resolution (no setup required for end users).
+# Priority: CLI flag (--backend URL) > env var > saved config file > built-in default.
+# The chosen URL is persisted to ~/.intelliasset/config.json so it "just works"
+# on every subsequent run.
+# ---------------------------------------------------------------------------
+DEFAULT_BACKEND_URL = "https://intelliasset-backend.onrender.com"
+CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".intelliasset")
+CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
+
+def _load_config():
+    try:
+        with open(CONFIG_FILE, "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+def _save_config(config):
+    try:
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        with open(CONFIG_FILE, "w") as f:
+            json.dump(config, f, indent=2)
+    except OSError as e:
+        logging.warning(f"Could not save config to {CONFIG_FILE}: {e}")
+
+def resolve_backend_url():
+    # 1. CLI flag: python main.py --backend https://my-backend.example.com
+    if "--backend" in sys.argv:
+        idx = sys.argv.index("--backend")
+        if idx + 1 < len(sys.argv):
+            url = sys.argv[idx + 1].strip().rstrip("/")
+            if url:
+                _save_config({**_load_config(), "backend_url": url})
+                logging.info(f"Backend URL set via --backend flag and saved: {url}")
+                return url
+
+    # 2. Environment variable override (optional, for advanced users)
+    env_url = os.getenv("INTELLIASSET_BACKEND_URL", "").strip().rstrip("/")
+    if env_url:
+        _save_config({**_load_config(), "backend_url": env_url})
+        return env_url
+
+    # 3. Previously saved config
+    saved = _load_config().get("backend_url", "").strip().rstrip("/")
+    if saved:
+        return saved
+
+    # 4. Built-in production default — works out of the box
+    return DEFAULT_BACKEND_URL
+
+CENTRAL_BACKEND_URL = resolve_backend_url()
 CENTRAL_WS_URL = CENTRAL_BACKEND_URL.replace("https://", "wss://").replace("http://", "ws://")
+logging.info(f"Using backend: {CENTRAL_BACKEND_URL}")
+
+if "localhost" in CENTRAL_BACKEND_URL or "127.0.0.1" in CENTRAL_BACKEND_URL:
+    logging.warning("NOTE: Agent is pointing at a LOCAL backend — data will not reach the hosted dashboard.")
 
 # Cache for slow metrics
 slow_metrics_cache = {
@@ -64,6 +116,29 @@ def login():
     global AUTH_TOKEN
     import getpass
 
+    # Reuse a previously saved session token if it's still valid,
+    # so the user doesn't have to sign in on every run.
+    saved_token = _load_config().get("auth_token")
+    if saved_token:
+        try:
+            res = requests.post(
+                f"{CENTRAL_BACKEND_URL}/api/assets/register",
+                json={
+                    "device_id": DEVICE_ID,
+                    "hostname": platform.node(),
+                    "os_name": f"{platform.system()} {platform.release()}",
+                },
+                headers={"Authorization": f"Bearer {saved_token}"},
+                timeout=15,
+            )
+            if res.status_code == 200:
+                AUTH_TOKEN = saved_token
+                logging.info("Restored previous session — no sign-in needed.")
+                return
+            logging.info("Saved session expired, please sign in again.")
+        except Exception as e:
+            logging.warning(f"Could not verify saved session ({e}), continuing to sign-in.")
+
     email = os.getenv("INTELLIASSET_EMAIL")
     password = os.getenv("INTELLIASSET_PASSWORD")
 
@@ -92,6 +167,7 @@ def login():
         if res.status_code == 200:
             data = res.json()
             AUTH_TOKEN = data["token"]
+            _save_config({**_load_config(), "auth_token": AUTH_TOKEN})
             user = data.get("user", {})
             logging.info(f"Signed in as {user.get('name')} ({user.get('role')}). This device will be enrolled under your account.")
             return
