@@ -84,11 +84,11 @@ const Layout = ({ children, user, onLogout }) => {
       {/* Main Content Area */}
       <main className="flex-1 p-4 md:p-8 overflow-y-auto relative">
         {/* Hanging decorative elements */}
-        <div className="hidden lg:block absolute top-0 right-[30%] pointer-events-none" aria-hidden="true">
+        <div className="hidden lg:block absolute top-0 left-[12%] pointer-events-none" aria-hidden="true">
           <div className="w-px h-16 bg-ink mx-auto"></div>
           <div className="w-8 h-8 rounded-full bg-danger border-2 border-ink animate-sway origin-top"></div>
         </div>
-        <div className="hidden lg:block absolute top-0 right-[38%] pointer-events-none" aria-hidden="true">
+        <div className="hidden lg:block absolute top-0 left-[5%] pointer-events-none" aria-hidden="true">
           <div className="w-px h-9 bg-ink mx-auto"></div>
           <div className="w-6 h-6 bg-accentYellow border-2 border-ink animate-sway-slow origin-top"></div>
         </div>
