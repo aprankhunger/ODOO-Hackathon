@@ -4,3 +4,4 @@ psutil
 websockets
 wmi
 pywin32
+requests
