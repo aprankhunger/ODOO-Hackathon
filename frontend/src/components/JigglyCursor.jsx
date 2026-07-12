@@ -11,22 +11,23 @@ export default function JigglyCursor() {
   const mouseX = useMotionValue(-100);
   const mouseY = useMotionValue(-100);
 
-  // Smooth, heavily-damped spring = fluid gliding with no bounce or overshoot
-  const springX = useSpring(mouseX, { stiffness: 220, damping: 30, mass: 0.6 });
-  const springY = useSpring(mouseY, { stiffness: 220, damping: 30, mass: 0.6 });
+  // Tight, critically-damped spring: keeps up with fast movement,
+  // trailing only a tiny bit before catching up — no bounce, no lag.
+  const springX = useSpring(mouseX, { stiffness: 1200, damping: 70, mass: 0.4 });
+  const springY = useSpring(mouseY, { stiffness: 1200, damping: 70, mass: 0.4 });
 
-  // Gentle liquid deformation based on how far the circle lags behind the cursor.
-  // The stretch amount itself is run through a soft spring so the shape morphs
-  // fluidly instead of snapping.
+  // Liquid deformation driven by the (small) lag distance. Since the circle
+  // stays close now, the divisor is small so quick flicks still produce a
+  // visible fluid stretch, smoothed through its own spring.
   const dx = useTransform(() => mouseX.get() - springX.get());
   const dy = useTransform(() => mouseY.get() - springY.get());
   const rawStretch = useTransform(() => {
-    const dist = Math.min(Math.hypot(dx.get(), dy.get()), 80);
-    return dist / 80; // 0..1
+    const dist = Math.min(Math.hypot(dx.get(), dy.get()), 24);
+    return dist / 24; // 0..1
   });
-  const stretch = useSpring(rawStretch, { stiffness: 160, damping: 26, mass: 0.5 });
-  const scaleX = useTransform(stretch, (s) => 1 + s * 0.28);
-  const scaleY = useTransform(stretch, (s) => 1 - s * 0.16);
+  const stretch = useSpring(rawStretch, { stiffness: 300, damping: 30, mass: 0.4 });
+  const scaleX = useTransform(stretch, (s) => 1 + s * 0.35);
+  const scaleY = useTransform(stretch, (s) => 1 - s * 0.2);
   const rotate = useTransform(() => (Math.atan2(dy.get(), dx.get()) * 180) / Math.PI);
 
   useEffect(() => {
