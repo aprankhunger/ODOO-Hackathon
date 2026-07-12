@@ -152,7 +152,17 @@ def assign_technician(req: AssignRequest, db: Session = Depends(get_db)):
     if not latest_telemetry:
         raise HTTPException(status_code=404, detail="No telemetry data found for this device")
 
-    telemetry_data = latest_telemetry.detailed_metrics
+    telemetry_data = latest_telemetry.detailed_metrics if latest_telemetry.detailed_metrics else {}
+    
+    # Trim down the telemetry data to avoid token limits
+    trimmed_telemetry = {
+        "cpu": telemetry_data.get("cpu", 0),
+        "ram": telemetry_data.get("ram", 0),
+        "disk": telemetry_data.get("disk", 0),
+        "status": telemetry_data.get("status", "Unknown"),
+        "top_processes": telemetry_data.get("top_processes", [])[:3], # Only top 3
+        "recent_errors": telemetry_data.get("recent_errors", [])[:2] # Only top 2 errors
+    }
 
     # 2. Call Gemini AI to generate a report
     ai_report = "AI Report currently unavailable. (Please set GEMINI_API_KEY)"
@@ -168,11 +178,11 @@ def assign_technician(req: AssignRequest, db: Session = Depends(get_db)):
             3. A strict priority score: 1 (High/Critical), 2 (Medium), or 3 (Low/Healthy). Return this score exactly on the first line as "Priority: X".
             
             Telemetry:
-            {json.dumps(telemetry_data, indent=2)}
+            {json.dumps(trimmed_telemetry, indent=2)}
             """
             
             response = gemini_client.models.generate_content(
-                model='gemini-1.5-flash',
+                model='gemini-2.5-flash',
                 contents=prompt
             )
             ai_report = response.text
@@ -233,14 +243,13 @@ def chatbot_interaction(req: ChatRequest, db: Session = Depends(get_db)):
     for asset in assets:
         latest = db.query(Telemetry).filter(Telemetry.device_id == asset.device_id).order_by(Telemetry.timestamp.desc()).first()
         if latest:
+            # We trim down the data sent to the AI to prevent Free Tier token limit errors
             fleet_data.append({
-                "hostname": asset.hostname,
-                "os": asset.os_name,
+                "host": asset.hostname,
                 "cpu": latest.cpu_percent,
                 "ram": latest.ram_percent,
                 "disk": latest.disk_percent,
-                "status": latest.status,
-                "recent_errors": latest.detailed_metrics.get("recent_errors", []) if latest.detailed_metrics else []
+                "status": latest.status
             })
             
     reply = "AI Chatbot is currently unavailable. (Please set GEMINI_API_KEY in backend/.env)"
@@ -260,7 +269,7 @@ def chatbot_interaction(req: ChatRequest, db: Session = Depends(get_db)):
             """
             
             response = gemini_client.models.generate_content(
-                model='gemini-1.5-flash',
+                model='gemini-2.5-flash',
                 contents=prompt
             )
             reply = response.text
