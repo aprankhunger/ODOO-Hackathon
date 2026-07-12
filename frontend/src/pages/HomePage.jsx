@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
-import { ChevronRight, Play, Zap, BarChart3, Users, Truck, Brain, Terminal } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { ChevronRight, Play, Zap, BarChart3, Users, Truck, Brain, Terminal, Cpu, HardDrive, Activity } from 'lucide-react';
 
 export default function HomePage() {
+  const navigate = useNavigate();
   const [scrollY, setScrollY] = useState(0);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
 
@@ -21,39 +23,39 @@ export default function HomePage() {
 
   const features = [
     {
-      icon: Truck,
-      title: 'Asset Management',
-      description: 'Manage all your assets with real-time tracking and status updates.',
+      icon: Activity,
+      title: 'Live System Monitoring',
+      description: 'Real-time CPU, RAM, disk usage, network latency, temperature tracking.',
       color: 'primary'
     },
     {
-      icon: Zap,
-      title: 'Smart Allocations',
-      description: 'Intelligent resource allocation powered by AI for optimal efficiency.',
+      icon: Cpu,
+      title: 'Performance Analytics',
+      description: 'Monitor top processes, identify bottlenecks, track system health metrics.',
       color: 'success'
     },
     {
-      icon: BarChart3,
-      title: 'Advanced Analytics',
-      description: 'Comprehensive reporting and insights to drive data-informed decisions.',
+      icon: HardDrive,
+      title: 'Security & Compliance',
+      description: 'Track antivirus status, security events, disk health, and event logs.',
       color: 'warning'
     },
     {
-      icon: Users,
-      title: 'Team Collaboration',
-      description: 'Seamless coordination between admins, technicians, and dispatch teams.',
+      icon: Truck,
+      title: 'Software Inventory',
+      description: 'Automatic detection and tracking of installed software versions.',
       color: 'danger'
     },
     {
       icon: Brain,
-      title: 'AI Assistant',
-      description: 'Natural language chatbot agent for instant support and automation.',
+      title: 'Predictive Maintenance',
+      description: 'AI-powered failure prediction based on system metrics and patterns.',
       color: 'primary'
     },
     {
       icon: BarChart3,
-      title: 'Maintenance Tracking',
-      description: 'Schedule and track maintenance records for all assets.',
+      title: 'Comprehensive Reports',
+      description: 'Generate detailed asset health, compliance, and performance reports.',
       color: 'success'
     },
   ];
@@ -110,13 +112,19 @@ export default function HomePage() {
 
           {/* CTA Buttons */}
           <div className="flex flex-col sm:flex-row gap-4 justify-center mb-16">
-            <button className="group btn-bauhaus bg-primary text-white px-8 py-4 text-lg font-bold uppercase">
+            <button 
+              onClick={() => navigate('/login')}
+              className="group btn-bauhaus bg-primary text-white px-8 py-4 text-lg font-bold uppercase hover:shadow-bauhaus transition-shadow cursor-pointer"
+            >
               Enter Dashboard
               <ChevronRight className="inline ml-2 group-hover:translate-x-1 transition-transform" size={20} />
             </button>
-            <button className="group btn-bauhaus bg-surface border-ink text-ink px-8 py-4 text-lg font-bold uppercase flex items-center justify-center gap-2">
+            <button 
+              onClick={() => navigate('/login')}
+              className="group btn-bauhaus bg-surface border-ink text-ink px-8 py-4 text-lg font-bold uppercase flex items-center justify-center gap-2 hover:shadow-bauhaus transition-shadow cursor-pointer"
+            >
               <Play size={20} />
-              See Demo
+              Try Dashboard
             </button>
           </div>
 
@@ -150,32 +158,39 @@ export default function HomePage() {
               </div>
               
               <h2 className="font-display font-black text-5xl md:text-6xl uppercase leading-tight mb-6">
-                AI Agent
+                Intelligent
                 <br />
-                <span className="text-primary">Command</span> Line
+                <span className="text-primary">Agent</span> Monitoring
               </h2>
 
               <p className="text-base md:text-lg text-muted mb-8 leading-relaxed">
-                Control your entire asset infrastructure through a powerful CLI agent. Execute commands, generate reports, and manage operations—all from your terminal with natural language processing.
+                Deploy lightweight agents on your assets to collect real-time telemetry: CPU, RAM, disk, network, security status, and more. Automatic registration and continuous data streaming to your dashboard.
               </p>
 
               <div className="mb-8">
                 <p className="text-xs font-bold uppercase tracking-widest text-primary mb-4">Quick Start:</p>
                 <div className="bg-surface border-3 border-ink shadow-bauhaus p-4 md:p-6 font-mono text-sm overflow-x-auto">
                   <pre className="text-ink">
-                    <code>{`$ python agent/main.py
+                    <code>{`$ cd agent
+$ pip install -r requirements.txt
+$ python main.py
 
-> assets allocate --strategy optimal
-> assets report --type maintenance
-> assets list --status active
-> assets analyze --period month`}</code>
+Device ID: [MAC ADDRESS]
+Registering with backend...
+Connected! Streaming telemetry...`}</code>
                   </pre>
                 </div>
               </div>
 
-              <button className="btn-bauhaus bg-ink text-surface px-6 py-3 font-bold uppercase text-sm flex items-center gap-2">
+              <button 
+                onClick={() => {
+                  const element = document.getElementById('agent-docs');
+                  if (element) element.scrollIntoView({ behavior: 'smooth' });
+                }}
+                className="btn-bauhaus bg-ink text-surface px-6 py-3 font-bold uppercase text-sm flex items-center gap-2 hover:shadow-bauhaus transition-shadow cursor-pointer"
+              >
                 <Terminal size={18} />
-                View CLI Docs
+                View Agent Docs
               </button>
             </div>
 
@@ -183,7 +198,7 @@ export default function HomePage() {
             <div className="relative">
               <div className="bg-ink border-4 border-ink shadow-bauhaus-lg p-6">
                 <div className="flex items-center justify-between mb-4 pb-4 border-b-2 border-accentYellow">
-                  <p className="text-accentYellow font-mono text-xs font-bold">$ FLEET_AGENT.py</p>
+                  <p className="text-accentYellow font-mono text-xs font-bold">$ INTELLIASSET_AGENT.py</p>
                   <div className="flex gap-1">
                     <div className="w-3 h-3 bg-danger border border-accentYellow" />
                     <div className="w-3 h-3 bg-warning border border-accentYellow" />
@@ -192,13 +207,13 @@ export default function HomePage() {
                 </div>
                 
                 <div className="space-y-2 font-mono text-xs text-accentYellow">
-                  <p>{'> allocate assets --ai-optimized true'}</p>
-                  <p className="text-success">{'✓ Optimal allocation: 47 assignments'}</p>
-                  <p className="mt-4">{'> analyze maintenance --predict-failures'}</p>
-                  <p className="text-warning">{'⚠ 3 assets require attention'}</p>
-                  <p className="mt-4">{'> generate report --format pdf'}</p>
-                  <p className="text-success">{'✓ Report generated: report_2024.pdf'}</p>
-                  <p className="mt-4 opacity-50 animate-pulse">{'█ awaiting command...'}</p>
+                  <p>{'Registering device: AA:BB:CC:DD:EE:FF'}</p>
+                  <p className="text-success">{'✓ Device registered successfully'}</p>
+                  <p className="mt-4">{'Connecting to backend...'}</p>
+                  <p className="text-success">{'✓ Connected to ws://localhost:8001'}</p>
+                  <p className="mt-4">{'Streaming telemetry: CPU(45%), RAM(62%), Disk(38%)'}</p>
+                  <p className="text-success">{'✓ Data sent every 2 seconds'}</p>
+                  <p className="mt-4 opacity-50 animate-pulse">{'► monitoring active...'}</p>
                 </div>
               </div>
               
@@ -268,12 +283,18 @@ export default function HomePage() {
           </p>
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <button className="btn-bauhaus bg-accentYellow text-ink px-8 py-4 text-lg font-bold uppercase border-2 border-accentYellow">
-              Get Started Free
+            <button 
+              onClick={() => navigate('/login')}
+              className="btn-bauhaus bg-accentYellow text-ink px-8 py-4 text-lg font-bold uppercase border-2 border-accentYellow hover:shadow-bauhaus transition-shadow cursor-pointer"
+            >
+              Access Dashboard
               <ChevronRight className="inline ml-2" size={20} />
             </button>
-            <button className="btn-bauhaus bg-transparent border-2 border-surface text-surface px-8 py-4 text-lg font-bold uppercase hover:bg-surface hover:text-ink">
-              Contact Sales
+            <button 
+              onClick={() => navigate('/')}
+              className="btn-bauhaus bg-transparent border-2 border-surface text-surface px-8 py-4 text-lg font-bold uppercase hover:bg-surface hover:text-ink cursor-pointer"
+            >
+              View Docs
             </button>
           </div>
         </div>
