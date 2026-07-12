@@ -223,6 +223,53 @@ def technician_login(req: LoginRequest, db: Session = Depends(get_db)):
     
     return {"message": "Login successful", "assigned_devices": assigned_devices}
 
+class ChatRequest(BaseModel):
+    message: str
+
+@app.post("/api/chat")
+def chatbot_interaction(req: ChatRequest, db: Session = Depends(get_db)):
+    assets = db.query(Asset).all()
+    fleet_data = []
+    for asset in assets:
+        latest = db.query(Telemetry).filter(Telemetry.device_id == asset.device_id).order_by(Telemetry.timestamp.desc()).first()
+        if latest:
+            fleet_data.append({
+                "hostname": asset.hostname,
+                "os": asset.os_name,
+                "cpu": latest.cpu_percent,
+                "ram": latest.ram_percent,
+                "disk": latest.disk_percent,
+                "status": latest.status,
+                "recent_errors": latest.detailed_metrics.get("recent_errors", []) if latest.detailed_metrics else []
+            })
+            
+    reply = "AI Chatbot is currently unavailable. (Please set GEMINI_API_KEY in backend/.env)"
+    
+    if gemini_client:
+        try:
+            prompt = f"""
+            You are IntelliAsset AI, an expert IT fleet management assistant. 
+            The user is an IT Admin asking a question about their fleet of devices.
+            
+            Here is the current real-time data for all active devices in the fleet:
+            {json.dumps(fleet_data, indent=2)}
+            
+            User's Question: "{req.message}"
+            
+            Provide a helpful, concise, and professional answer. If they ask about specific metrics (like RAM, CPU, or crashes), refer to the data provided. Use markdown for formatting if needed.
+            """
+            
+            response = gemini_client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=prompt
+            )
+            reply = response.text
+        except Exception as e:
+            print(f"Gemini Chat Error: {e}")
+            reply = f"AI Error: {str(e)}"
+            
+    return {"reply": reply}
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8001)
