@@ -114,6 +114,7 @@ class AssetItem(Base):
     expected_return_date = Column(DateTime, nullable=True)
     is_bookable = Column(Boolean, default=False)  # shared resources (rooms, projectors)
     overdue_flagged = Column(Boolean, default=False)  # overdue notification sent once
+    custom_field_values = Column(JSON, nullable=True)  # {"Warranty Period": "2 years", ...}
     created_at = Column(DateTime, default=datetime.utcnow)
 
     category = relationship("AssetCategory")
@@ -167,3 +168,54 @@ class AllocationHistory(Base):
 
     asset_item = relationship("AssetItem")
     user = relationship("User")
+
+class MaintenanceRequest(Base):
+    __tablename__ = "maintenance_requests"
+
+    id = Column(Integer, primary_key=True, index=True)
+    asset_item_id = Column(Integer, ForeignKey("asset_items.id"), index=True)
+    requested_by = Column(Integer, ForeignKey("users.id"))
+    description = Column(String, nullable=False)
+    priority = Column(String, default="medium")  # high | medium | low
+    photo = Column(String, nullable=True)  # base64 data URL
+    status = Column(String, default="pending")  # pending | approved | rejected | assigned | in_progress | resolved
+    decision_note = Column(String, nullable=True)
+    decided_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    technician_code = Column(String, nullable=True)
+    resolution_note = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    decided_at = Column(DateTime, nullable=True)
+    resolved_at = Column(DateTime, nullable=True)
+
+    asset_item = relationship("AssetItem")
+
+class AuditCycle(Base):
+    __tablename__ = "audit_cycles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    scope_department_id = Column(Integer, ForeignKey("departments.id"), nullable=True)  # null = all departments
+    start_date = Column(DateTime, nullable=True)
+    end_date = Column(DateTime, nullable=True)
+    status = Column(String, default="open")  # open | closed
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    closed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class AuditAssignment(Base):
+    __tablename__ = "audit_assignments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    cycle_id = Column(Integer, ForeignKey("audit_cycles.id"), index=True)
+    auditor_user_id = Column(Integer, ForeignKey("users.id"))
+
+class AuditRecord(Base):
+    __tablename__ = "audit_records"
+
+    id = Column(Integer, primary_key=True, index=True)
+    cycle_id = Column(Integer, ForeignKey("audit_cycles.id"), index=True)
+    asset_item_id = Column(Integer, ForeignKey("asset_items.id"), index=True)
+    result = Column(String, nullable=False)  # verified | missing | damaged
+    note = Column(String, nullable=True)
+    auditor_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)

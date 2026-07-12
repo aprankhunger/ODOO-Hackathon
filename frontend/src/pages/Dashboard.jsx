@@ -49,10 +49,6 @@ const Dashboard = ({ user }) => {
     return () => clearTimeout(t);
   }, [toast]);
 
-  const quickAction = (label) => {
-    setToast(`${label} — this workflow is coming in an upcoming screen.`);
-  };
-
   const formatReturnDate = (iso) => {
     if (!iso) return 'N/A';
     return new Date(iso).toLocaleDateString([], { month: 'short', day: 'numeric' });
@@ -78,13 +74,13 @@ const Dashboard = ({ user }) => {
 
         {/* Quick actions */}
         <div className="flex flex-wrap gap-2">
-          <button onClick={() => quickAction('Register Asset')} className="btn-bauhaus bg-primary text-white px-3 py-2 text-xs font-bold uppercase tracking-wide flex items-center gap-1.5">
+          <button onClick={() => navigate('/assets?register=1')} className="btn-bauhaus bg-primary text-white px-3 py-2 text-xs font-bold uppercase tracking-wide flex items-center gap-1.5">
             <Plus size={15} /> Register Asset
           </button>
           <button onClick={() => navigate('/bookings')} className="btn-bauhaus bg-accentYellow text-ink px-3 py-2 text-xs font-bold uppercase tracking-wide flex items-center gap-1.5">
             <CalendarPlus size={15} /> Book Resource
           </button>
-          <button onClick={() => quickAction('Raise Maintenance Request')} className="btn-bauhaus bg-danger text-white px-3 py-2 text-xs font-bold uppercase tracking-wide flex items-center gap-1.5">
+          <button onClick={() => navigate('/maintenance')} className="btn-bauhaus bg-danger text-white px-3 py-2 text-xs font-bold uppercase tracking-wide flex items-center gap-1.5">
             <Hammer size={15} /> Maintenance
           </button>
         </div>

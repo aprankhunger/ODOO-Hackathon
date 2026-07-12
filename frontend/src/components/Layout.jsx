@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Activity, MessageSquare, LogOut, Shield, Wrench, BellRing, LayoutGrid, Building2, Package, CalendarDays } from 'lucide-react';
+import { Activity, MessageSquare, LogOut, Shield, Wrench, BellRing, LayoutGrid, Building2, Package, CalendarDays, Boxes, ClipboardCheck } from 'lucide-react';
 import NotificationBell from './NotificationBell';
 
 const ROLE_LABELS = {
@@ -29,6 +29,7 @@ const Layout = ({ children, user, onLogout }) => {
   const location = useLocation();
   const isAdmin = user?.role === 'admin';
   const isTechnician = user?.role === 'technician';
+  const isManager = ['admin', 'department_head', 'asset_manager'].includes(user?.role);
 
   const linkClass = (active, activeBg = 'bg-primary text-white') =>
     `flex items-center gap-2 md:gap-3 px-3 md:px-4 py-2.5 md:py-3 border-2 border-ink font-bold uppercase text-xs md:text-sm tracking-wide transition-all whitespace-nowrap ${
@@ -82,6 +83,21 @@ const Layout = ({ children, user, onLogout }) => {
                   <CalendarDays size={18} className="flex-shrink-0" />
                   <span className="hidden sm:inline">Bookings</span>
                   <span className="sm:hidden">Book</span>
+                </Link>
+                <Link to="/assets" className={linkClass(location.pathname === '/assets')}>
+                  <Boxes size={18} className="flex-shrink-0" />
+                  <span className="hidden sm:inline">Assets</span>
+                  <span className="sm:hidden">Assets</span>
+                </Link>
+                <Link to="/maintenance" className={linkClass(location.pathname === '/maintenance')}>
+                  <Wrench size={18} className="flex-shrink-0" />
+                  <span className="hidden sm:inline">Maintenance</span>
+                  <span className="sm:hidden">Fix</span>
+                </Link>
+                <Link to="/audits" className={linkClass(location.pathname === '/audits')}>
+                  <ClipboardCheck size={18} className="flex-shrink-0" />
+                  <span className="hidden sm:inline">Audits</span>
+                  <span className="sm:hidden">Audit</span>
                 </Link>
                 {isAdmin && (
                   <>

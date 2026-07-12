@@ -10,6 +10,9 @@ import ActivityLog from './pages/ActivityLog';
 import Organization from './pages/Organization';
 import Allocations from './pages/Allocations';
 import Bookings from './pages/Bookings';
+import Maintenance from './pages/Maintenance';
+import Assets from './pages/Assets';
+import Audits from './pages/Audits';
 
 const API = 'http://localhost:8001';
 
@@ -88,6 +91,9 @@ function App() {
               <Route path="/" element={<Dashboard user={user} />} />
               <Route path="/allocations" element={<Allocations user={user} />} />
               <Route path="/bookings" element={<Bookings user={user} />} />
+              <Route path="/maintenance" element={<Maintenance user={user} />} />
+              <Route path="/assets" element={<Assets user={user} />} />
+              <Route path="/audits" element={<Audits user={user} />} />
               {isAdmin && <Route path="/fleet" element={<Fleet />} />}
               {isAdmin && <Route path="/chat" element={<Chatbot />} />}
               {isAdmin && <Route path="/activity" element={<ActivityLog />} />}

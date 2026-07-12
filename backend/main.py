@@ -15,7 +15,8 @@ from database import engine, get_db, SessionLocal
 from models import (
     Asset, Telemetry, TechnicianCode, Notification, AuditLog,
     User, Department, AssetCategory, AssetItem, Booking, Transfer,
-    AllocationHistory, Base,
+    AllocationHistory, MaintenanceRequest, AuditCycle, AuditAssignment,
+    AuditRecord, Base,
 )
 from pydantic import BaseModel
 
@@ -44,6 +45,7 @@ def ensure_columns():
         "asset_items": [
             ("is_bookable", "BOOLEAN DEFAULT 0"),
             ("overdue_flagged", "BOOLEAN DEFAULT 0"),
+            ("custom_field_values", "TEXT"),
         ],
         "bookings": [
             ("reminder_sent", "BOOLEAN DEFAULT 0"),
@@ -1503,6 +1505,542 @@ def my_bookings(user: User = Depends(get_current_user), db: Session = Depends(ge
     bookings = db.query(Booking).filter(Booking.user_id == user.id).order_by(Booking.start_time.desc()).limit(50).all()
     now = datetime.utcnow()
     return {"bookings": [serialize_booking(b, db, now) for b in bookings]}
+
+# ---------------------------------------------------------------------------
+# Maintenance Management endpoints (Screen 7)
+# ---------------------------------------------------------------------------
+
+OPEN_MAINTENANCE_STATUSES = ("pending", "approved", "assigned", "in_progress")
+PRIORITY_TO_INT = {"high": 1, "medium": 2, "low": 3}
+
+def serialize_maintenance(m: MaintenanceRequest, db: Session, include_photo: bool = False):
+    item = db.query(AssetItem).filter(AssetItem.id == m.asset_item_id).first()
+    requester = db.query(User).filter(User.id == m.requested_by).first()
+    decider = db.query(User).filter(User.id == m.decided_by).first() if m.decided_by else None
+    data = {
+        "id": m.id,
+        "asset_item_id": m.asset_item_id,
+        "asset_tag": item.asset_tag if item else None,
+        "asset_name": item.name if item else None,
+        "requested_by": requester.name if requester else "Unknown",
+        "requested_by_id": m.requested_by,
+        "description": m.description,
+        "priority": m.priority,
+        "has_photo": bool(m.photo),
+        "status": m.status,
+        "decision_note": m.decision_note,
+        "decided_by": decider.name if decider else None,
+        "technician_code": m.technician_code,
+        "resolution_note": m.resolution_note,
+        "created_at": m.created_at.isoformat() if m.created_at else None,
+        "decided_at": m.decided_at.isoformat() if m.decided_at else None,
+        "resolved_at": m.resolved_at.isoformat() if m.resolved_at else None,
+    }
+    if include_photo:
+        data["photo"] = m.photo
+    return data
+
+class MaintenanceCreateRequest(BaseModel):
+    asset_item_id: int
+    description: str
+    priority: str = "medium"
+    photo: str | None = None  # base64 data URL
+
+@app.post("/api/maintenance")
+async def raise_maintenance(req: MaintenanceCreateRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    item = db.query(AssetItem).filter(AssetItem.id == req.asset_item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    if not req.description.strip():
+        raise HTTPException(status_code=400, detail="Please describe the issue")
+    if req.priority not in PRIORITY_TO_INT:
+        raise HTTPException(status_code=400, detail="Invalid priority")
+    if req.photo and len(req.photo) > 2_000_000:
+        raise HTTPException(status_code=400, detail="Photo too large (max ~1.5 MB)")
+
+    existing = db.query(MaintenanceRequest).filter(
+        MaintenanceRequest.asset_item_id == item.id,
+        MaintenanceRequest.status.in_(OPEN_MAINTENANCE_STATUSES),
+    ).first()
+    if existing:
+        raise HTTPException(status_code=409, detail=f"An open maintenance request (#{existing.id}, {existing.status}) already exists for this asset")
+
+    m = MaintenanceRequest(
+        asset_item_id=item.id,
+        requested_by=user.id,
+        description=req.description.strip(),
+        priority=req.priority,
+        photo=req.photo,
+        status="pending",
+    )
+    db.add(m)
+    db.commit()
+    db.refresh(m)
+
+    log_action(db, actor=user.email, actor_role=user.role, action="MAINTENANCE_REQUESTED", target=item.asset_tag,
+               details=f"Reported: {req.description.strip()[:120]} (priority: {req.priority}).")
+    await create_notification(db, recipient_role="admin", type="maintenance_requested", title="Maintenance Requested",
+                              message=f"{user.name} reported an issue with {item.name} ({item.asset_tag}) — priority {req.priority}. Awaiting approval.",
+                              severity="warning" if req.priority == "high" else "info")
+
+    return {"request": serialize_maintenance(m, db)}
+
+@app.get("/api/maintenance")
+def list_maintenance(asset_item_id: int = None, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    query = db.query(MaintenanceRequest)
+    if asset_item_id:
+        query = query.filter(MaintenanceRequest.asset_item_id == asset_item_id)
+    if user.role not in MANAGER_ROLES:
+        query = query.filter(MaintenanceRequest.requested_by == user.id)
+    requests = query.order_by(MaintenanceRequest.created_at.desc()).limit(100).all()
+    return {"requests": [serialize_maintenance(m, db) for m in requests], "can_manage": user.role in MANAGER_ROLES}
+
+@app.get("/api/maintenance/{req_id}/photo")
+def maintenance_photo(req_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    m = db.query(MaintenanceRequest).filter(MaintenanceRequest.id == req_id).first()
+    if not m or not m.photo:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    return {"photo": m.photo}
+
+class DecisionRequest(BaseModel):
+    note: str | None = None
+
+@app.post("/api/maintenance/{req_id}/approve")
+async def approve_maintenance(req_id: int, body: DecisionRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if user.role not in MANAGER_ROLES:
+        raise HTTPException(status_code=403, detail="Only Asset Managers, Department Heads, or Admins can approve")
+    m = db.query(MaintenanceRequest).filter(MaintenanceRequest.id == req_id).first()
+    if not m or m.status != "pending":
+        raise HTTPException(status_code=404, detail="Pending request not found")
+
+    item = db.query(AssetItem).filter(AssetItem.id == m.asset_item_id).first()
+    m.status = "approved"
+    m.decided_by = user.id
+    m.decision_note = body.note
+    m.decided_at = datetime.utcnow()
+    if item:
+        item.status = "maintenance"  # asset auto-updates to Under Maintenance
+    db.commit()
+
+    log_action(db, actor=user.email, actor_role=user.role, action="MAINTENANCE_APPROVED", target=item.asset_tag if item else None,
+               details=f"Approved maintenance request MR-{m.id} for {item.name if item else 'asset'}.")
+    await create_notification(db, recipient_role="all", type="maintenance_approved", title="Maintenance Approved",
+                              message=f"Maintenance request MR-{m.id} for {item.name if item else 'asset'} ({item.asset_tag if item else ''}) approved by {user.name}. Asset is now Under Maintenance.",
+                              severity="success")
+
+    return {"request": serialize_maintenance(m, db)}
+
+@app.post("/api/maintenance/{req_id}/reject")
+async def reject_maintenance(req_id: int, body: DecisionRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if user.role not in MANAGER_ROLES:
+        raise HTTPException(status_code=403, detail="Only Asset Managers, Department Heads, or Admins can reject")
+    if not body.note or not body.note.strip():
+        raise HTTPException(status_code=400, detail="A rejection note is required")
+    m = db.query(MaintenanceRequest).filter(MaintenanceRequest.id == req_id).first()
+    if not m or m.status != "pending":
+        raise HTTPException(status_code=404, detail="Pending request not found")
+
+    item = db.query(AssetItem).filter(AssetItem.id == m.asset_item_id).first()
+    m.status = "rejected"
+    m.decided_by = user.id
+    m.decision_note = body.note.strip()
+    m.decided_at = datetime.utcnow()
+    db.commit()
+
+    log_action(db, actor=user.email, actor_role=user.role, action="MAINTENANCE_REJECTED", target=item.asset_tag if item else None,
+               details=f"Rejected MR-{m.id}: {body.note.strip()[:120]}")
+    await create_notification(db, recipient_role="all", type="maintenance_rejected", title="Maintenance Rejected",
+                              message=f"Maintenance request MR-{m.id} for {item.name if item else 'asset'} ({item.asset_tag if item else ''}) rejected: {body.note.strip()[:80]}",
+                              severity="warning")
+
+    return {"request": serialize_maintenance(m, db)}
+
+@app.post("/api/maintenance/{req_id}/assign")
+async def assign_maintenance_technician(req_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if user.role not in MANAGER_ROLES:
+        raise HTTPException(status_code=403, detail="Only Asset Managers, Department Heads, or Admins can assign technicians")
+    m = db.query(MaintenanceRequest).filter(MaintenanceRequest.id == req_id).first()
+    if not m or m.status != "approved":
+        raise HTTPException(status_code=404, detail="Approved request not found (approve it first)")
+
+    item = db.query(AssetItem).filter(AssetItem.id == m.asset_item_id).first()
+
+    # Reuse the TECH-code system: ensure a device row exists for the asset tag
+    device_id = item.asset_tag if item else f"MR-{m.id}"
+    if not db.query(Asset).filter(Asset.device_id == device_id).first():
+        db.add(Asset(device_id=device_id, hostname=item.name if item else f"Maintenance MR-{m.id}", os_name="N/A"))
+        db.commit()
+
+    code = "TECH-" + ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
+    report = (
+        f"MAINTENANCE TICKET MR-{m.id}\n"
+        f"Asset: {item.name if item else 'Unknown'} ({device_id})\n"
+        f"Priority: {m.priority.upper()}\n\n"
+        f"Reported issue:\n{m.description}\n\n"
+        + (f"Manager note: {m.decision_note}\n" if m.decision_note else "")
+    )
+    db.add(TechnicianCode(code=code, device_id=device_id, ai_report=report, priority=PRIORITY_TO_INT.get(m.priority, 3)))
+    m.status = "assigned"
+    m.technician_code = code
+    db.commit()
+
+    log_action(db, actor=user.email, actor_role=user.role, action="TECHNICIAN_ASSIGNED", target=device_id,
+               details=f"Assigned technician to MR-{m.id} with access code {code}.")
+    await create_notification(db, recipient_role="technician", type="asset_assigned", title="New Repair Ticket",
+                              message=f"Repair ticket MR-{m.id} for {item.name if item else 'asset'} ({device_id}) — Priority: {m.priority.capitalize()}. Access code: {code}.",
+                              severity="danger" if m.priority == "high" else "warning")
+
+    return {"request": serialize_maintenance(m, db)}
+
+@app.post("/api/maintenance/{req_id}/start")
+async def start_maintenance(req_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if user.role not in MANAGER_ROLES:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    m = db.query(MaintenanceRequest).filter(MaintenanceRequest.id == req_id).first()
+    if not m or m.status != "assigned":
+        raise HTTPException(status_code=404, detail="Assigned request not found")
+    m.status = "in_progress"
+    db.commit()
+    item = db.query(AssetItem).filter(AssetItem.id == m.asset_item_id).first()
+    log_action(db, actor=user.email, actor_role=user.role, action="MAINTENANCE_STARTED", target=item.asset_tag if item else None,
+               details=f"Work started on MR-{m.id}.")
+    return {"request": serialize_maintenance(m, db)}
+
+class ResolveRequest(BaseModel):
+    note: str | None = None
+
+@app.post("/api/maintenance/{req_id}/resolve")
+async def resolve_maintenance(req_id: int, body: ResolveRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if user.role not in MANAGER_ROLES:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    m = db.query(MaintenanceRequest).filter(MaintenanceRequest.id == req_id).first()
+    if not m or m.status not in ("assigned", "in_progress"):
+        raise HTTPException(status_code=404, detail="Active request not found")
+
+    item = db.query(AssetItem).filter(AssetItem.id == m.asset_item_id).first()
+    m.status = "resolved"
+    m.resolution_note = body.note
+    m.resolved_at = datetime.utcnow()
+    if item and item.status == "maintenance":
+        # Back to Available, or Allocated if still assigned to someone
+        item.status = "allocated" if item.assigned_to_user_id else "available"
+    db.commit()
+
+    log_action(db, actor=user.email, actor_role=user.role, action="MAINTENANCE_RESOLVED", target=item.asset_tag if item else None,
+               details=f"Resolved MR-{m.id}." + (f" Note: {body.note[:100]}" if body.note else ""))
+    await create_notification(db, recipient_role="all", type="maintenance_resolved", title="Maintenance Resolved",
+                              message=f"MR-{m.id}: {item.name if item else 'asset'} ({item.asset_tag if item else ''}) has been repaired and is back in service.",
+                              severity="success")
+
+    return {"request": serialize_maintenance(m, db)}
+
+# ---------------------------------------------------------------------------
+# Asset Registration & Directory endpoints (Screen 4)
+# ---------------------------------------------------------------------------
+
+class AssetRegisterRequest(BaseModel):
+    asset_tag: str
+    name: str
+    category_id: int | None = None
+    department_id: int | None = None
+    is_bookable: bool = False
+    custom_field_values: dict | None = None
+
+@app.get("/api/asset-items/next-tag")
+def next_asset_tag(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    tags = [i.asset_tag for i in db.query(AssetItem).filter(AssetItem.asset_tag.like("AF-%")).all()]
+    max_num = 0
+    for t in tags:
+        try:
+            max_num = max(max_num, int(t.split("-")[1]))
+        except (IndexError, ValueError):
+            pass
+    return {"next_tag": f"AF-{max_num + 1:04d}"}
+
+@app.post("/api/asset-items")
+async def register_asset_item(req: AssetRegisterRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if user.role not in MANAGER_ROLES:
+        raise HTTPException(status_code=403, detail="Only Asset Managers, Department Heads, or Admins can register assets")
+    tag = req.asset_tag.strip().upper()
+    if not tag or not req.name.strip():
+        raise HTTPException(status_code=400, detail="Asset tag and name are required")
+    if db.query(AssetItem).filter(AssetItem.asset_tag == tag).first():
+        raise HTTPException(status_code=409, detail=f"Asset tag {tag} is already in use")
+
+    item = AssetItem(
+        asset_tag=tag,
+        name=req.name.strip(),
+        category_id=req.category_id,
+        department_id=req.department_id,
+        is_bookable=req.is_bookable,
+        custom_field_values=req.custom_field_values or {},
+        status="available",
+    )
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+
+    log_action(db, actor=user.email, actor_role=user.role, action="ASSET_REGISTERED", target=tag,
+               details=f"Registered {item.name}.")
+    await create_notification(db, recipient_role="admin", type="asset_registered", title="New Asset Registered",
+                              message=f"{item.name} ({tag}) was registered by {user.name}.", severity="info")
+
+    return {"item": serialize_asset_item(item, db)}
+
+@app.get("/api/asset-items/{item_id}/detail")
+def asset_item_detail(item_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    item = db.query(AssetItem).filter(AssetItem.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    data = serialize_asset_item(item, db)
+    data["custom_field_values"] = item.custom_field_values or {}
+
+    alloc_rows = db.query(AllocationHistory).filter(AllocationHistory.asset_item_id == item.id).order_by(AllocationHistory.allocated_at.desc()).all()
+    allocation_history = []
+    for h in alloc_rows:
+        holder = db.query(User).filter(User.id == h.user_id).first()
+        allocation_history.append({
+            "user_name": holder.name if holder else "Unknown",
+            "allocated_at": h.allocated_at.isoformat() if h.allocated_at else None,
+            "returned_at": h.returned_at.isoformat() if h.returned_at else None,
+            "condition_notes": h.condition_notes,
+            "released_by": h.released_by,
+        })
+
+    maint_rows = db.query(MaintenanceRequest).filter(MaintenanceRequest.asset_item_id == item.id).order_by(MaintenanceRequest.created_at.desc()).all()
+    maintenance_history = [serialize_maintenance(m, db) for m in maint_rows]
+
+    audit_rows = db.query(AuditRecord).filter(AuditRecord.asset_item_id == item.id).order_by(AuditRecord.created_at.desc()).all()
+    audit_history = []
+    for r in audit_rows:
+        cycle = db.query(AuditCycle).filter(AuditCycle.id == r.cycle_id).first()
+        auditor = db.query(User).filter(User.id == r.auditor_user_id).first() if r.auditor_user_id else None
+        audit_history.append({
+            "cycle_name": cycle.name if cycle else f"Cycle {r.cycle_id}",
+            "result": r.result,
+            "note": r.note,
+            "auditor": auditor.name if auditor else None,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        })
+
+    return {
+        "item": data,
+        "allocation_history": allocation_history,
+        "maintenance_history": maintenance_history,
+        "audit_history": audit_history,
+    }
+
+# ---------------------------------------------------------------------------
+# Asset Audit endpoints (Screen 8)
+# ---------------------------------------------------------------------------
+
+def cycle_scope_assets(cycle: AuditCycle, db: Session):
+    query = db.query(AssetItem).filter(AssetItem.is_bookable == False)
+    if cycle.scope_department_id:
+        query = query.filter(AssetItem.department_id == cycle.scope_department_id)
+    return query.order_by(AssetItem.asset_tag).all()
+
+def serialize_cycle(cycle: AuditCycle, db: Session):
+    dept = db.query(Department).filter(Department.id == cycle.scope_department_id).first() if cycle.scope_department_id else None
+    creator = db.query(User).filter(User.id == cycle.created_by).first() if cycle.created_by else None
+    auditor_ids = [a.auditor_user_id for a in db.query(AuditAssignment).filter(AuditAssignment.cycle_id == cycle.id).all()]
+    auditors = db.query(User).filter(User.id.in_(auditor_ids)).all() if auditor_ids else []
+    scope_assets = cycle_scope_assets(cycle, db)
+    records = db.query(AuditRecord).filter(AuditRecord.cycle_id == cycle.id).all()
+    counts = {"verified": 0, "missing": 0, "damaged": 0}
+    for r in records:
+        if r.result in counts:
+            counts[r.result] += 1
+    return {
+        "id": cycle.id,
+        "name": cycle.name,
+        "scope_department": dept.name if dept else "All departments",
+        "scope_department_id": cycle.scope_department_id,
+        "start_date": cycle.start_date.isoformat() if cycle.start_date else None,
+        "end_date": cycle.end_date.isoformat() if cycle.end_date else None,
+        "status": cycle.status,
+        "created_by": creator.name if creator else None,
+        "closed_at": cycle.closed_at.isoformat() if cycle.closed_at else None,
+        "auditors": [{"id": u.id, "name": u.name} for u in auditors],
+        "auditor_ids": auditor_ids,
+        "total_assets": len(scope_assets),
+        "counts": counts,
+        "unchecked": len(scope_assets) - sum(counts.values()),
+    }
+
+class AuditCycleCreateRequest(BaseModel):
+    name: str
+    scope_department_id: int | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+    auditor_ids: list[int] = []
+
+@app.post("/api/audit-cycles")
+async def create_audit_cycle(req: AuditCycleCreateRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if user.role not in MANAGER_ROLES:
+        raise HTTPException(status_code=403, detail="Only Asset Managers, Department Heads, or Admins can create audit cycles")
+    if not req.name.strip():
+        raise HTTPException(status_code=400, detail="Cycle name is required")
+    if not req.auditor_ids:
+        raise HTTPException(status_code=400, detail="Assign at least one auditor")
+
+    def parse_date(s):
+        if not s:
+            return None
+        try:
+            return datetime.fromisoformat(s)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid date")
+
+    cycle = AuditCycle(
+        name=req.name.strip(),
+        scope_department_id=req.scope_department_id,
+        start_date=parse_date(req.start_date),
+        end_date=parse_date(req.end_date),
+        status="open",
+        created_by=user.id,
+    )
+    db.add(cycle)
+    db.commit()
+    db.refresh(cycle)
+    for uid in set(req.auditor_ids):
+        db.add(AuditAssignment(cycle_id=cycle.id, auditor_user_id=uid))
+    db.commit()
+
+    dept = db.query(Department).filter(Department.id == req.scope_department_id).first() if req.scope_department_id else None
+    log_action(db, actor=user.email, actor_role=user.role, action="AUDIT_STARTED", target=cycle.name,
+               details=f"Created audit cycle '{cycle.name}' (scope: {dept.name if dept else 'all departments'}).")
+    await create_notification(db, recipient_role="all", type="audit_started", title="Audit Cycle Started",
+                              message=f"Audit cycle '{cycle.name}' created — scope: {dept.name if dept else 'all departments'}.", severity="info")
+
+    return {"cycle": serialize_cycle(cycle, db)}
+
+@app.get("/api/audit-cycles")
+def list_audit_cycles(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    cycles = db.query(AuditCycle).order_by(AuditCycle.created_at.desc()).all()
+    return {"cycles": [serialize_cycle(c, db) for c in cycles], "can_manage": user.role in MANAGER_ROLES}
+
+@app.get("/api/audit-cycles/{cycle_id}")
+def audit_cycle_detail(cycle_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    cycle = db.query(AuditCycle).filter(AuditCycle.id == cycle_id).first()
+    if not cycle:
+        raise HTTPException(status_code=404, detail="Audit cycle not found")
+
+    records = {r.asset_item_id: r for r in db.query(AuditRecord).filter(AuditRecord.cycle_id == cycle.id).all()}
+    assets = []
+    for item in cycle_scope_assets(cycle, db):
+        rec = records.get(item.id)
+        auditor = db.query(User).filter(User.id == rec.auditor_user_id).first() if rec and rec.auditor_user_id else None
+        assets.append({
+            **serialize_asset_item(item, db),
+            "audit_result": rec.result if rec else None,
+            "audit_note": rec.note if rec else None,
+            "audited_by": auditor.name if auditor else None,
+        })
+
+    data = serialize_cycle(cycle, db)
+    is_auditor = user.id in data["auditor_ids"]
+    return {"cycle": data, "assets": assets, "can_record": (is_auditor or user.role == "admin") and cycle.status == "open", "can_manage": user.role in MANAGER_ROLES}
+
+class AuditRecordRequest(BaseModel):
+    asset_item_id: int
+    result: str  # verified | missing | damaged
+    note: str | None = None
+
+@app.post("/api/audit-cycles/{cycle_id}/record")
+async def record_audit(cycle_id: int, req: AuditRecordRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    cycle = db.query(AuditCycle).filter(AuditCycle.id == cycle_id).first()
+    if not cycle:
+        raise HTTPException(status_code=404, detail="Audit cycle not found")
+    if cycle.status != "open":
+        raise HTTPException(status_code=409, detail="This audit cycle is closed and locked")
+    assigned = db.query(AuditAssignment).filter(AuditAssignment.cycle_id == cycle.id, AuditAssignment.auditor_user_id == user.id).first()
+    if not assigned and user.role != "admin":
+        raise HTTPException(status_code=403, detail="You are not an assigned auditor for this cycle")
+    if req.result not in ("verified", "missing", "damaged"):
+        raise HTTPException(status_code=400, detail="Result must be verified, missing, or damaged")
+
+    item = db.query(AssetItem).filter(AssetItem.id == req.asset_item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    rec = db.query(AuditRecord).filter(AuditRecord.cycle_id == cycle.id, AuditRecord.asset_item_id == item.id).first()
+    if rec:
+        rec.result = req.result
+        rec.note = req.note
+        rec.auditor_user_id = user.id
+        rec.created_at = datetime.utcnow()
+    else:
+        rec = AuditRecord(cycle_id=cycle.id, asset_item_id=item.id, result=req.result, note=req.note, auditor_user_id=user.id)
+        db.add(rec)
+    db.commit()
+
+    if req.result in ("missing", "damaged"):
+        log_action(db, actor=user.email, actor_role=user.role, action="AUDIT_FLAGGED", target=item.asset_tag,
+                   details=f"[{cycle.name}] {item.name} marked {req.result.upper()}." + (f" Note: {req.note[:80]}" if req.note else ""))
+        await create_notification(db, recipient_role="admin", type="audit_discrepancy", title="Audit Discrepancy Flagged",
+                                  message=f"[{cycle.name}] {item.name} ({item.asset_tag}) marked {req.result.upper()} by {user.name}.",
+                                  severity="danger")
+
+    return {"message": "Recorded", "result": req.result}
+
+@app.get("/api/audit-cycles/{cycle_id}/report")
+def audit_discrepancy_report(cycle_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    cycle = db.query(AuditCycle).filter(AuditCycle.id == cycle_id).first()
+    if not cycle:
+        raise HTTPException(status_code=404, detail="Audit cycle not found")
+    flagged = db.query(AuditRecord).filter(AuditRecord.cycle_id == cycle.id, AuditRecord.result.in_(["missing", "damaged"])).all()
+    report = []
+    for r in flagged:
+        item = db.query(AssetItem).filter(AssetItem.id == r.asset_item_id).first()
+        auditor = db.query(User).filter(User.id == r.auditor_user_id).first() if r.auditor_user_id else None
+        report.append({
+            "asset_tag": item.asset_tag if item else None,
+            "asset_name": item.name if item else None,
+            "result": r.result,
+            "note": r.note,
+            "auditor": auditor.name if auditor else None,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        })
+    return {"cycle_name": cycle.name, "status": cycle.status, "discrepancies": report}
+
+@app.post("/api/audit-cycles/{cycle_id}/close")
+async def close_audit_cycle(cycle_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if user.role not in MANAGER_ROLES:
+        raise HTTPException(status_code=403, detail="Only Asset Managers, Department Heads, or Admins can close audit cycles")
+    cycle = db.query(AuditCycle).filter(AuditCycle.id == cycle_id).first()
+    if not cycle or cycle.status != "open":
+        raise HTTPException(status_code=404, detail="Open audit cycle not found")
+
+    now = datetime.utcnow()
+    flagged = db.query(AuditRecord).filter(AuditRecord.cycle_id == cycle.id, AuditRecord.result.in_(["missing", "damaged"])).all()
+    lost_count = 0
+    damaged_count = 0
+    for r in flagged:
+        item = db.query(AssetItem).filter(AssetItem.id == r.asset_item_id).first()
+        if not item:
+            continue
+        if r.result == "missing":
+            item.status = "lost"
+            item.assigned_to_user_id = None
+            item.expected_return_date = None
+            lost_count += 1
+        elif r.result == "damaged" and item.status not in ("maintenance",):
+            item.status = "maintenance"
+            damaged_count += 1
+
+    cycle.status = "closed"
+    cycle.closed_at = now
+    db.commit()
+
+    log_action(db, actor=user.email, actor_role=user.role, action="AUDIT_CLOSED", target=cycle.name,
+               details=f"Closed audit cycle '{cycle.name}': {lost_count} asset(s) marked LOST, {damaged_count} sent to maintenance.")
+    await create_notification(db, recipient_role="all", type="audit_closed", title="Audit Cycle Closed",
+                              message=f"Audit cycle '{cycle.name}' closed — {lost_count} asset(s) marked Lost, {damaged_count} sent to maintenance.",
+                              severity="warning" if (lost_count or damaged_count) else "success")
+
+    return {"cycle": serialize_cycle(cycle, db)}
 
 # ---------------------------------------------------------------------------
 # Background loop: overdue auto-flag + booking reminders
