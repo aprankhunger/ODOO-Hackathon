@@ -6,6 +6,11 @@
   html {
     @apply bg-background;
   }
+  /* Hide the native cursor when the jiggly cursor is active (mouse devices only) */
+  .jiggly-cursor-active,
+  .jiggly-cursor-active * {
+    cursor: none !important;
+  }
   body {
     @apply bg-background text-ink antialiased selection:bg-accentYellow selection:text-ink;
   }
