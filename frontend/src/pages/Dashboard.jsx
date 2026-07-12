@@ -50,14 +50,14 @@ const Dashboard = () => {
   };
 
   const handleAssignTechnician = async () => {
-    if (!activeDevice.device_id) return;
+    const deviceId = activeDevice.device_id || 'demo-device-001';
     setIsAssigning(true);
     setAssignedCode(null);
     try {
       const res = await fetch('http://localhost:8001/api/admin/assign', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ device_id: activeDevice.device_id })
+        body: JSON.stringify({ device_id: deviceId })
       });
       const data = await res.json();
       setAssignedCode(data.code);
@@ -127,9 +127,9 @@ const Dashboard = () => {
           </div>
         </div>
         <button
-          disabled={!activeDevice.device_id || isAssigning}
+          disabled={isAssigning}
           onClick={handleAssignTechnician}
-          className="btn-bauhaus bg-accentYellow text-ink disabled:opacity-50 px-4 py-2.5 flex items-center gap-2 text-sm"
+          className="btn-bauhaus bg-accentYellow text-ink disabled:opacity-50 px-4 py-2.5 flex items-center gap-2 text-sm cursor-pointer"
         >
           <UserPlus size={18} />
           <span>{isAssigning ? 'Generating AI Report...' : 'Assign Technician'}</span>
