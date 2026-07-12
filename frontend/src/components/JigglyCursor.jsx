@@ -11,19 +11,22 @@ export default function JigglyCursor() {
   const mouseX = useMotionValue(-100);
   const mouseY = useMotionValue(-100);
 
-  // Loose, bouncy spring = the jiggle
-  const springX = useSpring(mouseX, { stiffness: 350, damping: 18, mass: 0.7 });
-  const springY = useSpring(mouseY, { stiffness: 350, damping: 18, mass: 0.7 });
+  // Smooth, heavily-damped spring = fluid gliding with no bounce or overshoot
+  const springX = useSpring(mouseX, { stiffness: 220, damping: 30, mass: 0.6 });
+  const springY = useSpring(mouseY, { stiffness: 220, damping: 30, mass: 0.6 });
 
-  // Squish based on how far the circle is lagging behind the real cursor
+  // Gentle liquid deformation based on how far the circle lags behind the cursor.
+  // The stretch amount itself is run through a soft spring so the shape morphs
+  // fluidly instead of snapping.
   const dx = useTransform(() => mouseX.get() - springX.get());
   const dy = useTransform(() => mouseY.get() - springY.get());
-  const stretch = useTransform(() => {
-    const dist = Math.min(Math.hypot(dx.get(), dy.get()), 60);
-    return dist / 60; // 0..1
+  const rawStretch = useTransform(() => {
+    const dist = Math.min(Math.hypot(dx.get(), dy.get()), 80);
+    return dist / 80; // 0..1
   });
-  const scaleX = useTransform(stretch, (s) => 1 + s * 0.6);
-  const scaleY = useTransform(stretch, (s) => 1 - s * 0.35);
+  const stretch = useSpring(rawStretch, { stiffness: 160, damping: 26, mass: 0.5 });
+  const scaleX = useTransform(stretch, (s) => 1 + s * 0.28);
+  const scaleY = useTransform(stretch, (s) => 1 - s * 0.16);
   const rotate = useTransform(() => (Math.atan2(dy.get(), dx.get()) * 180) / Math.PI);
 
   useEffect(() => {
@@ -78,8 +81,8 @@ export default function JigglyCursor() {
           scaleY,
           rotate,
         }}
-        animate={{ scale: pressed ? 0.55 : 1 }}
-        transition={{ type: 'spring', stiffness: 500, damping: 15 }}
+        animate={{ scale: pressed ? 0.75 : 1 }}
+        transition={{ type: 'spring', stiffness: 300, damping: 25 }}
       />
     </>
   );
