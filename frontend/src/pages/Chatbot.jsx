@@ -116,6 +116,7 @@ const Chatbot = () => {
             />
             <button
               type="submit"
+              aria-label="Send message"
               disabled={isLoading || !input.trim()}
               className="bg-primary hover:bg-blue-600 disabled:opacity-50 disabled:hover:bg-primary text-white rounded-xl px-6 py-4 flex items-center justify-center transition-all shadow-lg shadow-primary/20"
             >
