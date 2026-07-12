@@ -13,6 +13,7 @@ import Bookings from './pages/Bookings';
 import Maintenance from './pages/Maintenance';
 import Assets from './pages/Assets';
 import Audits from './pages/Audits';
+import Reports from './pages/Reports';
 
 const API = 'http://localhost:8001';
 
@@ -94,6 +95,7 @@ function App() {
               <Route path="/maintenance" element={<Maintenance user={user} />} />
               <Route path="/assets" element={<Assets user={user} />} />
               <Route path="/audits" element={<Audits user={user} />} />
+              <Route path="/reports" element={<Reports user={user} />} />
               {isAdmin && <Route path="/fleet" element={<Fleet />} />}
               {isAdmin && <Route path="/chat" element={<Chatbot />} />}
               {isAdmin && <Route path="/activity" element={<ActivityLog />} />}

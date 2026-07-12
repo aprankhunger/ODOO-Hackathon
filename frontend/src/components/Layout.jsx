@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Activity, MessageSquare, LogOut, Shield, Wrench, BellRing, LayoutGrid, Building2, Package, CalendarDays, Boxes, ClipboardCheck } from 'lucide-react';
+import { Activity, MessageSquare, LogOut, Shield, Wrench, BellRing, LayoutGrid, Building2, Package, CalendarDays, Boxes, ClipboardCheck, BarChart3 } from 'lucide-react';
 import NotificationBell from './NotificationBell';
 
 const ROLE_LABELS = {
@@ -99,6 +99,13 @@ const Layout = ({ children, user, onLogout }) => {
                   <span className="hidden sm:inline">Audits</span>
                   <span className="sm:hidden">Audit</span>
                 </Link>
+                {isManager && (
+                  <Link to="/reports" className={linkClass(location.pathname === '/reports')}>
+                    <BarChart3 size={18} className="flex-shrink-0" />
+                    <span className="hidden sm:inline">Reports</span>
+                    <span className="sm:hidden">Stats</span>
+                  </Link>
+                )}
                 {isAdmin && (
                   <>
                     <Link to="/fleet" className={linkClass(location.pathname === '/fleet')}>

@@ -2043,6 +2043,174 @@ async def close_audit_cycle(cycle_id: int, user: User = Depends(get_current_user
     return {"cycle": serialize_cycle(cycle, db)}
 
 # ---------------------------------------------------------------------------
+# Reports & Analytics endpoint (Screen 9)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/reports")
+def reports(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if user.role not in MANAGER_ROLES:
+        raise HTTPException(status_code=403, detail="Reports are available to Asset Managers, Department Heads, and Admins only")
+
+    now = datetime.utcnow()
+    window_start = now - timedelta(days=90)
+    items = db.query(AssetItem).all()
+    users_by_id = {u.id: u.name for u in db.query(User).all()}
+    cats_by_id = {c.id: c.name for c in db.query(AssetCategory).all()}
+    depts_by_id = {d.id: d.name for d in db.query(Department).all()}
+
+    # --- 1. Utilization (last 90 days) ---
+    alloc_rows = db.query(AllocationHistory).filter(
+        (AllocationHistory.returned_at == None) | (AllocationHistory.returned_at >= window_start)
+    ).all()
+    booking_rows = db.query(Booking).filter(Booking.status != "cancelled", Booking.end_time >= window_start).all()
+
+    alloc_days = {}
+    for h in alloc_rows:
+        start = max(h.allocated_at or window_start, window_start)
+        end = min(h.returned_at or now, now)
+        if end > start:
+            alloc_days[h.asset_item_id] = alloc_days.get(h.asset_item_id, 0) + (end - start).total_seconds() / 86400
+
+    # Seeded allocations predate the history table: treat currently-allocated
+    # assets without any history rows as allocated since the window start.
+    tracked_ids = {h.asset_item_id for h in db.query(AllocationHistory.asset_item_id).all()}
+    for item in items:
+        if item.status == "allocated" and item.id not in tracked_ids:
+            alloc_days[item.id] = 90.0
+    booking_hours = {}
+    for b in booking_rows:
+        start = max(b.start_time, window_start)
+        end = min(b.end_time, now)
+        if end > start:
+            booking_hours[b.asset_item_id] = booking_hours.get(b.asset_item_id, 0) + (end - start).total_seconds() / 3600
+
+    utilization = []
+    for item in items:
+        if item.is_bookable:
+            hours = booking_hours.get(item.id, 0)
+            pct = min(round(hours / (90 * 12) * 100, 1), 100)  # 12 usable hours/day
+            measure = f"{round(hours, 1)} hrs booked"
+        else:
+            days = alloc_days.get(item.id, 0)
+            pct = min(round(days / 90 * 100, 1), 100)
+            measure = f"{round(days, 1)} days allocated"
+        utilization.append({
+            "asset_tag": item.asset_tag, "name": item.name, "is_bookable": bool(item.is_bookable),
+            "utilization_pct": pct, "measure": measure, "status": item.status,
+        })
+    utilization.sort(key=lambda x: x["utilization_pct"], reverse=True)
+    most_used = utilization[:5]
+    idle = [u for u in utilization if u["utilization_pct"] == 0 and u["status"] not in ("lost",)]
+
+    # --- 2. Maintenance frequency ---
+    maint_rows = db.query(MaintenanceRequest).all()
+    by_asset, by_category = {}, {}
+    resolution_times = []
+    for m in maint_rows:
+        by_asset[m.asset_item_id] = by_asset.get(m.asset_item_id, 0) + 1
+        item = next((i for i in items if i.id == m.asset_item_id), None)
+        cat = cats_by_id.get(item.category_id, "Uncategorized") if item else "Uncategorized"
+        by_category[cat] = by_category.get(cat, 0) + 1
+        if m.resolved_at and m.created_at:
+            resolution_times.append((m.resolved_at - m.created_at).total_seconds() / 3600)
+    maint_by_asset = []
+    for item_id, count in sorted(by_asset.items(), key=lambda x: -x[1])[:8]:
+        item = next((i for i in items if i.id == item_id), None)
+        if item:
+            maint_by_asset.append({"asset_tag": item.asset_tag, "name": item.name, "requests": count})
+    maint_by_category = [{"category": k, "requests": v} for k, v in sorted(by_category.items(), key=lambda x: -x[1])]
+    avg_resolution_hours = round(sum(resolution_times) / len(resolution_times), 1) if resolution_times else None
+
+    # --- 3. Attention list (due for maintenance / nearing retirement / overdue / lost) ---
+    attention = []
+    for item in items:
+        reasons = []
+        if item.status == "allocated" and item.expected_return_date and item.expected_return_date < now:
+            days_over = max((now - item.expected_return_date).days, 1)
+            reasons.append(("overdue_return", f"Return overdue by {days_over} day(s) — held by {users_by_id.get(item.assigned_to_user_id, 'unknown')}"))
+        if item.status == "maintenance":
+            reasons.append(("under_maintenance", "Currently under maintenance"))
+        if by_asset.get(item.id, 0) >= 3:
+            reasons.append(("nearing_retirement", f"{by_asset[item.id]} maintenance requests — consider retirement"))
+        if item.status == "lost":
+            reasons.append(("lost", "Confirmed missing in audit"))
+        for code, detail in reasons:
+            attention.append({"asset_tag": item.asset_tag, "name": item.name, "type": code, "detail": detail})
+    type_order = {"overdue_return": 0, "lost": 1, "under_maintenance": 2, "nearing_retirement": 3}
+    attention.sort(key=lambda a: type_order.get(a["type"], 9))
+
+    # --- 4. Department summary ---
+    open_maint_by_dept = {}
+    for m in maint_rows:
+        if m.status in OPEN_MAINTENANCE_STATUSES:
+            item = next((i for i in items if i.id == m.asset_item_id), None)
+            if item and item.department_id:
+                open_maint_by_dept[item.department_id] = open_maint_by_dept.get(item.department_id, 0) + 1
+    dept_summary = []
+    for dept_id, dept_name in depts_by_id.items():
+        dept_items = [i for i in items if i.department_id == dept_id]
+        if not dept_items:
+            continue
+        dept_summary.append({
+            "department": dept_name,
+            "total": len(dept_items),
+            "allocated": sum(1 for i in dept_items if i.status == "allocated"),
+            "available": sum(1 for i in dept_items if i.status == "available"),
+            "maintenance": sum(1 for i in dept_items if i.status == "maintenance"),
+            "lost": sum(1 for i in dept_items if i.status == "lost"),
+            "open_maintenance": open_maint_by_dept.get(dept_id, 0),
+        })
+    unassigned = [i for i in items if not i.department_id]
+    if unassigned:
+        dept_summary.append({
+            "department": "Unassigned",
+            "total": len(unassigned),
+            "allocated": sum(1 for i in unassigned if i.status == "allocated"),
+            "available": sum(1 for i in unassigned if i.status == "available"),
+            "maintenance": sum(1 for i in unassigned if i.status == "maintenance"),
+            "lost": sum(1 for i in unassigned if i.status == "lost"),
+            "open_maintenance": 0,
+        })
+
+    # --- 5. Booking heatmap (last 60 days + upcoming, day x hour counts) ---
+    heat_window = now - timedelta(days=60)
+    heat_bookings = db.query(Booking).filter(Booking.status != "cancelled", Booking.end_time >= heat_window).all()
+    heatmap = [[0] * 24 for _ in range(7)]  # [weekday][hour]
+    for b in heat_bookings:
+        cur = b.start_time.replace(minute=0, second=0, microsecond=0)
+        while cur < b.end_time:
+            heatmap[cur.weekday()][cur.hour] += 1
+            cur += timedelta(hours=1)
+
+    # --- 6. Status distribution ---
+    status_counts = {}
+    for item in items:
+        status_counts[item.status] = status_counts.get(item.status, 0) + 1
+
+    bookings_this_week = db.query(Booking).filter(
+        Booking.status != "cancelled",
+        Booking.start_time >= now - timedelta(days=now.weekday(), hours=now.hour, minutes=now.minute),
+        Booking.start_time < now + timedelta(days=7),
+    ).count()
+    avg_utilization = round(sum(u["utilization_pct"] for u in utilization) / len(utilization), 1) if utilization else 0
+
+    return {
+        "generated_at": now.isoformat(),
+        "kpis": {
+            "total_assets": len(items),
+            "avg_utilization_pct": avg_utilization,
+            "open_maintenance": sum(1 for m in maint_rows if m.status in OPEN_MAINTENANCE_STATUSES),
+            "bookings_this_week": bookings_this_week,
+        },
+        "utilization": {"most_used": most_used, "idle": idle, "all": utilization},
+        "maintenance": {"by_asset": maint_by_asset, "by_category": maint_by_category, "avg_resolution_hours": avg_resolution_hours, "total_requests": len(maint_rows)},
+        "attention": attention,
+        "department_summary": dept_summary,
+        "booking_heatmap": heatmap,
+        "status_distribution": status_counts,
+    }
+
+# ---------------------------------------------------------------------------
 # Background loop: overdue auto-flag + booking reminders
 # ---------------------------------------------------------------------------
 
