@@ -1,13 +1,53 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Activity, Server, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 const Dashboard = () => {
+  const [telemetryData, setTelemetryData] = useState([]);
+  const [currentStatus, setCurrentStatus] = useState({
+    cpu: 0,
+    ram: 0,
+    disk: 0,
+    status: 'Unknown'
+  });
+  
+  const [connectionStatus, setConnectionStatus] = useState('Connecting...');
+
+  useEffect(() => {
+    const ws = new WebSocket('ws://localhost:8000/ws/telemetry');
+    
+    ws.onopen = () => setConnectionStatus('Connected (Live)');
+    ws.onclose = () => setConnectionStatus('Disconnected');
+    ws.onerror = () => setConnectionStatus('Connection Error');
+    
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      
+      setCurrentStatus({
+        cpu: data.cpu,
+        ram: data.ram,
+        disk: data.disk,
+        status: data.status
+      });
+
+      setTelemetryData(prev => {
+        const timeStr = new Date(data.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        const newPoint = { time: timeStr, cpu: data.cpu, ram: data.ram };
+        const newArray = [...prev, newPoint];
+        if (newArray.length > 15) return newArray.slice(newArray.length - 15);
+        return newArray;
+      });
+    };
+
+    return () => ws.close();
+  }, []);
+
   const stats = [
-    { title: 'Total Assets', value: '1,248', icon: Server, color: 'text-blue-500', bg: 'bg-blue-500/10' },
-    { title: 'Healthy Devices', value: '1,192', icon: CheckCircle2, color: 'text-success', bg: 'bg-success/10' },
-    { title: 'At Risk', value: '43', icon: Activity, color: 'text-warning', bg: 'bg-warning/10' },
-    { title: 'Critical Failures', value: '13', icon: AlertTriangle, color: 'text-danger', bg: 'bg-danger/10' },
+    { title: 'Monitored Assets', value: '1', icon: Server, color: 'text-blue-500', bg: 'bg-blue-500/10' },
+    { title: 'Current Status', value: currentStatus.status, icon: currentStatus.status === 'Critical' ? AlertTriangle : CheckCircle2, color: currentStatus.status === 'Critical' ? 'text-danger' : 'text-success', bg: currentStatus.status === 'Critical' ? 'bg-danger/10' : 'bg-success/10' },
+    { title: 'CPU Usage', value: `${currentStatus.cpu}%`, icon: Activity, color: 'text-warning', bg: 'bg-warning/10' },
+    { title: 'RAM Usage', value: `${currentStatus.ram}%`, icon: Activity, color: 'text-indigo-400', bg: 'bg-indigo-400/10' },
   ];
 
   return (
@@ -20,7 +60,10 @@ const Dashboard = () => {
       <header className="flex justify-between items-end mb-8">
         <div>
           <h2 className="text-3xl font-bold tracking-tight mb-2">Fleet Overview</h2>
-          <p className="text-gray-400">Real-time intelligence on your enterprise devices.</p>
+          <div className="flex items-center space-x-2">
+            <div className={`w-2 h-2 rounded-full ${connectionStatus === 'Connected (Live)' ? 'bg-success animate-pulse' : 'bg-danger'}`}></div>
+            <p className="text-gray-400 text-sm">Agent Status: {connectionStatus}</p>
+          </div>
         </div>
         <button className="bg-primary hover:bg-blue-600 text-white shadow-lg shadow-blue-500/30 transition-all">
           Register Asset
@@ -50,18 +93,52 @@ const Dashboard = () => {
         ))}
       </div>
 
-      {/* Placeholder for Charts / Lists */}
+      {/* Charts / Lists */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-8">
         <div className="lg:col-span-2 glass-card p-6 min-h-[400px]">
-          <h3 className="text-xl font-bold mb-4 border-b border-border pb-4">System Health Trend</h3>
-          <div className="flex items-center justify-center h-[300px] text-gray-500 italic">
-            [Chart Component Placeholder]
+          <h3 className="text-xl font-bold mb-6 border-b border-border pb-4">Live Hardware Telemetry</h3>
+          <div className="h-[300px] w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={telemetryData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="colorCpu" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
+                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                  </linearGradient>
+                  <linearGradient id="colorRam" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#818cf8" stopOpacity={0.3}/>
+                    <stop offset="95%" stopColor="#818cf8" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <XAxis dataKey="time" stroke="#52525b" tick={{fill: '#a1a1aa', fontSize: 12}} />
+                <YAxis stroke="#52525b" tick={{fill: '#a1a1aa', fontSize: 12}} />
+                <Tooltip 
+                  contentStyle={{ backgroundColor: 'rgba(24, 24, 27, 0.9)', borderColor: '#3f3f46', borderRadius: '8px' }} 
+                  itemStyle={{ color: '#fff' }}
+                />
+                <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
+                <Area type="monotone" dataKey="cpu" stroke="#3b82f6" fillOpacity={1} fill="url(#colorCpu)" name="CPU %" />
+                <Area type="monotone" dataKey="ram" stroke="#818cf8" fillOpacity={1} fill="url(#colorRam)" name="RAM %" />
+              </AreaChart>
+            </ResponsiveContainer>
           </div>
         </div>
-        <div className="glass-card p-6 min-h-[400px]">
-          <h3 className="text-xl font-bold mb-4 border-b border-border pb-4">Recent Alerts</h3>
-          <div className="flex items-center justify-center h-[300px] text-gray-500 italic">
-            [Alert List Placeholder]
+        <div className="glass-card p-6 min-h-[400px] flex flex-col">
+          <h3 className="text-xl font-bold mb-4 border-b border-border pb-4">Agent Details</h3>
+          <div className="space-y-4 flex-1">
+            <div className="bg-surfaceHover p-4 rounded-xl border border-border">
+              <p className="text-xs text-gray-400 mb-1">Device ID</p>
+              <p className="font-mono text-sm">DEV-LOCAL-001</p>
+            </div>
+            <div className="bg-surfaceHover p-4 rounded-xl border border-border">
+              <p className="text-xs text-gray-400 mb-1">Disk Usage</p>
+              <div className="flex items-center space-x-3 mt-1">
+                <div className="flex-1 h-2 bg-gray-700 rounded-full overflow-hidden">
+                  <div className="h-full bg-success" style={{ width: `${currentStatus.disk}%` }}></div>
+                </div>
+                <span className="text-sm font-medium">{currentStatus.disk}%</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
