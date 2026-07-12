@@ -1,12 +1,30 @@
 import asyncio
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends
+import os
+import random
+import string
+import json
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from datetime import datetime
+from dotenv import load_dotenv
 
 from database import engine, get_db
-from models import Asset, Telemetry, Base
-import models
+from models import Asset, Telemetry, TechnicianCode, Base
+from pydantic import BaseModel
+
+try:
+    from google import genai
+except ImportError:
+    genai = None
+
+load_dotenv()
+
+# Initialize Gemini Client if API key is present
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+gemini_client = None
+if GEMINI_API_KEY and GEMINI_API_KEY != "put_your_key_here" and genai:
+    gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
 # Create tables if they don't exist
 Base.metadata.create_all(bind=engine)
@@ -21,8 +39,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# In-memory store for connected dashboards to broadcast live data
 dashboard_connections = []
+
+class AssignRequest(BaseModel):
+    device_id: str
+
+class LoginRequest(BaseModel):
+    code: str
 
 @app.websocket("/ws/dashboard")
 async def websocket_dashboard(websocket: WebSocket):
@@ -30,7 +53,6 @@ async def websocket_dashboard(websocket: WebSocket):
     dashboard_connections.append(websocket)
     try:
         while True:
-            # Keep connection open
             await websocket.receive_text()
     except WebSocketDisconnect:
         dashboard_connections.remove(websocket)
@@ -41,13 +63,10 @@ def register_asset(data: dict, db: Session = Depends(get_db)):
     if not device_id:
         return {"error": "device_id is required"}
     
-    # Check if already exists
     existing_asset = db.query(Asset).filter(Asset.device_id == device_id).first()
     if existing_asset:
-        # Ignore registration if it exists
         return {"message": "Asset already registered", "device_id": device_id}
     
-    # Create new asset
     new_asset = Asset(
         device_id=device_id,
         hostname=data.get("hostname", "Unknown Device"),
@@ -66,7 +85,6 @@ async def websocket_ingest(websocket: WebSocket, device_id: str, db: Session = D
         while True:
             data = await websocket.receive_json()
             
-            # Broadcast to all connected dashboards
             broadcast_payload = {
                 "device_id": device_id,
                 "telemetry": data
@@ -78,8 +96,6 @@ async def websocket_ingest(websocket: WebSocket, device_id: str, db: Session = D
                 except:
                     pass
             
-            # Save telemetry to database
-            # Extract basic metrics
             cpu = data.get("cpu", 0)
             ram = data.get("ram", 0)
             disk = data.get("disk", 0)
@@ -91,7 +107,7 @@ async def websocket_ingest(websocket: WebSocket, device_id: str, db: Session = D
                 ram_percent=ram,
                 disk_percent=disk,
                 status=status,
-                detailed_metrics=data # Store full payload
+                detailed_metrics=data 
             )
             
             db.add(new_telemetry)
@@ -103,7 +119,6 @@ async def websocket_ingest(websocket: WebSocket, device_id: str, db: Session = D
 @app.get("/api/assets")
 def get_all_assets(db: Session = Depends(get_db)):
     assets = db.query(Asset).all()
-    # Fetch latest telemetry for each asset
     result = []
     for asset in assets:
         latest = db.query(Telemetry).filter(Telemetry.device_id == asset.device_id).order_by(Telemetry.timestamp.desc()).first()
@@ -129,6 +144,84 @@ def get_asset_details(device_id: str, db: Session = Depends(get_db)):
         "asset": asset,
         "history": history
     }
+
+@app.post("/api/admin/assign")
+def assign_technician(req: AssignRequest, db: Session = Depends(get_db)):
+    # 1. Fetch latest telemetry
+    latest_telemetry = db.query(Telemetry).filter(Telemetry.device_id == req.device_id).order_by(Telemetry.timestamp.desc()).first()
+    if not latest_telemetry:
+        raise HTTPException(status_code=404, detail="No telemetry data found for this device")
+
+    telemetry_data = latest_telemetry.detailed_metrics
+
+    # 2. Call Gemini AI to generate a report
+    ai_report = "AI Report currently unavailable. (Please set GEMINI_API_KEY)"
+    priority = 3 # Default Low
+    
+    if gemini_client:
+        try:
+            prompt = f"""
+            You are an expert IT technician. Analyze this real-time device telemetry data and generate a short, actionable repair report.
+            Include:
+            1. A clear diagnosis of the most pressing issue (CPU, RAM, Disk, Event Logs, or Security).
+            2. Step-by-step fix instructions.
+            3. A strict priority score: 1 (High/Critical), 2 (Medium), or 3 (Low/Healthy). Return this score exactly on the first line as "Priority: X".
+            
+            Telemetry:
+            {json.dumps(telemetry_data, indent=2)}
+            """
+            
+            response = gemini_client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=prompt
+            )
+            ai_report = response.text
+            
+            # Parse priority
+            if "Priority: 1" in ai_report: priority = 1
+            elif "Priority: 2" in ai_report: priority = 2
+            
+        except Exception as e:
+            print(f"Gemini API Error: {e}")
+            ai_report = f"AI Generation Failed: {str(e)}"
+            
+    # 3. Generate Code
+    code = "TECH-" + ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
+    
+    # 4. Save to DB
+    tech_ticket = TechnicianCode(
+        code=code,
+        device_id=req.device_id,
+        ai_report=ai_report,
+        priority=priority
+    )
+    db.add(tech_ticket)
+    db.commit()
+    
+    return {"message": "Technician assigned", "code": code, "priority": priority}
+
+@app.post("/api/technician/login")
+def technician_login(req: LoginRequest, db: Session = Depends(get_db)):
+    tickets = db.query(TechnicianCode).filter(TechnicianCode.code == req.code).all()
+    if not tickets:
+        raise HTTPException(status_code=401, detail="Invalid Technician Code")
+    
+    # Map tickets with asset info
+    assigned_devices = []
+    for t in tickets:
+        asset = db.query(Asset).filter(Asset.device_id == t.device_id).first()
+        assigned_devices.append({
+            "device_id": t.device_id,
+            "hostname": asset.hostname if asset else "Unknown",
+            "priority": t.priority,
+            "ai_report": t.ai_report,
+            "assigned_at": t.created_at
+        })
+    
+    # Sort by priority (1 is highest)
+    assigned_devices.sort(key=lambda x: x["priority"])
+    
+    return {"message": "Login successful", "assigned_devices": assigned_devices}
 
 if __name__ == "__main__":
     import uvicorn
