@@ -2,15 +2,25 @@ import asyncio
 import psutil
 import subprocess
 import time
-import winreg
-import wmi
-import win32evtlog
 import uuid
 import platform
 import json
 import requests
 import websockets
 from datetime import datetime
+
+# Windows-specific libraries: import conditionally so the agent
+# also runs on macOS and Linux without crashing.
+try:
+    import winreg
+    import wmi
+    import win32evtlog
+    IS_WINDOWS = True
+except ImportError:
+    winreg = None
+    wmi = None
+    win32evtlog = None
+    IS_WINDOWS = False
 
 CENTRAL_BACKEND_URL = "http://localhost:8001"
 CENTRAL_WS_URL = "ws://localhost:8001"
@@ -44,6 +54,8 @@ def register_asset():
         print(f"Failed to register asset: {e}")
 
 def get_installed_software():
+    if not IS_WINDOWS:
+        return []
     software = []
     try:
         registry_paths = [
@@ -75,6 +87,10 @@ def get_installed_software():
     return software[:20]
 
 def get_wmi_metrics():
+    if not IS_WINDOWS:
+        slow_metrics_cache["security_status"] = "Unknown"
+        slow_metrics_cache["antivirus_status"] = "Unknown"
+        return
     try:
         c = wmi.WMI()
         disks = []
@@ -99,6 +115,9 @@ def get_wmi_metrics():
         pass
 
 def get_event_logs():
+    if not IS_WINDOWS:
+        slow_metrics_cache["event_logs"] = []
+        return
     logs = []
     try:
         server = 'localhost'
@@ -145,9 +164,13 @@ def get_fast_metrics():
 
     latency = "N/A"
     try:
-        res = subprocess.run(['ping', '-n', '1', '-w', '1000', '8.8.8.8'], capture_output=True, text=True)
+        if IS_WINDOWS:
+            ping_cmd = ['ping', '-n', '1', '-w', '1000', '8.8.8.8']
+        else:
+            ping_cmd = ['ping', '-c', '1', '-W', '1', '8.8.8.8']
+        res = subprocess.run(ping_cmd, capture_output=True, text=True)
         if "time=" in res.stdout:
-            latency = res.stdout.split("time=")[1].split("ms")[0] + "ms"
+            latency = res.stdout.split("time=")[1].split("ms")[0].strip() + "ms"
     except Exception:
         pass
 

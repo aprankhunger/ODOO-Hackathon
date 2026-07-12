@@ -146,7 +146,7 @@ const ActivityLog = () => {
             <div className="w-4 h-4 bg-accentYellow border-2 border-ink" aria-hidden="true"></div>
             <h2 className="text-3xl font-display font-black uppercase tracking-tight text-balance">Activity & Notifications</h2>
           </div>
-          <p className="text-muted text-sm font-medium">Every action across the fleet — who did what, and when.</p>
+          <p className="text-muted text-sm font-medium">Every action across your assets — who did what, and when.</p>
         </div>
       </header>
 
