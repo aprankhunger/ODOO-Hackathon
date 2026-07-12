@@ -6,6 +6,8 @@ import { API_BASE, WS_BASE } from '../lib/api';
 
 const Fleet = () => {
   const [deviceMap, setDeviceMap] = useState({});
+  const [registeredDevices, setRegisteredDevices] = useState([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState(null);
   const [telemetryHistory, setTelemetryHistory] = useState([]);
   const [connectionStatus, setConnectionStatus] = useState('Connecting...');
 
@@ -13,11 +15,24 @@ const Fleet = () => {
   const [isAssigning, setIsAssigning] = useState(false);
   const [assignedCode, setAssignedCode] = useState(null);
 
+  // Load the enrolled device roster (managers/admins only)
   useEffect(() => {
-    const ws = new WebSocket(`${WS_BASE}/ws/dashboard`);
+    const token = localStorage.getItem('ia_token');
+    fetch(`${API_BASE}/api/assets`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((res) => {
+        if (!res.ok) throw new Error('Failed to load devices');
+        return res.json();
+      })
+      .then(setRegisteredDevices)
+      .catch(() => setRegisteredDevices([]));
+  }, []);
+
+  useEffect(() => {
+    const token = localStorage.getItem('ia_token');
+    const ws = new WebSocket(`${WS_BASE}/ws/dashboard?token=${encodeURIComponent(token || '')}`);
 
     ws.onopen = () => setConnectionStatus('Connected to Central');
-    ws.onclose = () => setConnectionStatus('Disconnected');
+    ws.onclose = (e) => setConnectionStatus(e.code === 4403 ? 'Access Denied' : 'Disconnected');
     ws.onerror = () => setConnectionStatus('Connection Error');
 
     ws.onmessage = (event) => {
@@ -30,39 +45,51 @@ const Fleet = () => {
         ...prev,
         [device_id]: telemetry
       }));
-
-      setTelemetryHistory(prev => {
-        const timeStr = new Date(telemetry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-        const newPoint = { time: timeStr, cpu: telemetry.cpu, ram: telemetry.ram };
-        const newArray = [...prev, newPoint];
-        if (newArray.length > 15) return newArray.slice(newArray.length - 15);
-        return newArray;
-      });
     };
 
     return () => ws.close();
   }, []);
 
-  const totalAssets = Object.keys(deviceMap).length;
+  const totalAssets = Math.max(Object.keys(deviceMap).length, registeredDevices.length);
   const criticalAssets = Object.values(deviceMap).filter(t => t.status === 'Critical').length;
-  const healthyAssets = totalAssets - criticalAssets;
+  const healthyAssets = Object.keys(deviceMap).length - criticalAssets;
 
-  const activeDevice = Object.values(deviceMap)[0] || {
+  const activeDeviceId = selectedDeviceId || Object.keys(deviceMap)[0] || null;
+  const activeDevice = (activeDeviceId && deviceMap[activeDeviceId]) || {
     cpu: 0, ram: 0, disk: 0, status: 'Unknown', uptime: 'N/A', battery: 'N/A',
-    security: 'Unknown', temperature: 'N/A', top_processes: [], recent_errors: [], disk_health: [], hostname: 'N/A', device_id: null
+    security: 'Unknown', temperature: 'N/A', top_processes: [], recent_errors: [], disk_health: [], hostname: 'N/A', device_id: activeDeviceId
   };
 
+  // Accumulate chart history for the active device only
+  useEffect(() => {
+    if (!activeDeviceId || !deviceMap[activeDeviceId]) return;
+    const telemetry = deviceMap[activeDeviceId];
+    setTelemetryHistory(prev => {
+      const timeStr = new Date(telemetry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      const last = prev[prev.length - 1];
+      if (last && last.time === timeStr) return prev;
+      const newArray = [...prev, { time: timeStr, cpu: telemetry.cpu, ram: telemetry.ram }];
+      if (newArray.length > 15) return newArray.slice(newArray.length - 15);
+      return newArray;
+    });
+  }, [deviceMap, activeDeviceId]);
+
+  // Reset chart when switching devices
+  useEffect(() => { setTelemetryHistory([]); }, [selectedDeviceId]);
+
   const handleAssignTechnician = async () => {
-    const deviceId = activeDevice.device_id || 'demo-device-001';
+    const deviceId = activeDevice.device_id || activeDeviceId || 'demo-device-001';
     setIsAssigning(true);
     setAssignedCode(null);
     try {
+      const token = localStorage.getItem('ia_token');
       const res = await fetch(`${API_BASE}/api/admin/assign`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ device_id: deviceId })
       });
       const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Failed');
       setAssignedCode(data.code);
     } catch (err) {
       alert("Failed to assign technician");
@@ -161,6 +188,60 @@ const Fleet = () => {
             </div>
           </motion.div>
         ))}
+      </div>
+
+      {/* Enrolled device roster */}
+      <div className="glass-card overflow-x-auto">
+        <div className="flex items-center gap-2 px-6 pt-6 mb-4">
+          <div className="w-3 h-3 bg-success border border-ink" aria-hidden="true"></div>
+          <h3 className="text-xl font-display font-bold uppercase tracking-tight">Enrolled Devices</h3>
+        </div>
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-y-2 border-ink bg-ink text-white text-left">
+              <th className="px-6 py-2 text-[11px] font-bold uppercase tracking-widest">Device</th>
+              <th className="px-3 py-2 text-[11px] font-bold uppercase tracking-widest hidden md:table-cell">Asset Tag</th>
+              <th className="px-3 py-2 text-[11px] font-bold uppercase tracking-widest">Owner</th>
+              <th className="px-3 py-2 text-[11px] font-bold uppercase tracking-widest hidden lg:table-cell">OS</th>
+              <th className="px-3 py-2 text-[11px] font-bold uppercase tracking-widest">Live</th>
+            </tr>
+          </thead>
+          <tbody>
+            {registeredDevices.length === 0 && (
+              <tr>
+                <td colSpan={5} className="px-6 py-6 text-center text-muted">
+                  No devices enrolled yet. Run <span className="font-mono font-bold text-ink">python agent/main.py</span> on any machine and sign in with an IntelliAsset account to enroll it.
+                </td>
+              </tr>
+            )}
+            {registeredDevices.map((d) => {
+              const online = Boolean(deviceMap[d.device_id]);
+              const isActive = d.device_id === activeDeviceId;
+              return (
+                <tr
+                  key={d.device_id}
+                  onClick={() => setSelectedDeviceId(d.device_id)}
+                  className={`border-b border-ink/20 cursor-pointer transition-colors ${isActive ? 'bg-accentYellow/40' : 'hover:bg-surfaceHover'}`}
+                  title={`Track ${d.hostname}`}
+                >
+                  <td className="px-6 py-2.5 font-bold text-ink">{d.hostname || d.device_id}</td>
+                  <td className="px-3 py-2.5 hidden md:table-cell font-mono text-ink">{d.asset_tag || '—'}</td>
+                  <td className="px-3 py-2.5 text-ink">
+                    {d.owner_name || '—'}
+                    {d.owner_role && <span className="ml-1.5 text-[10px] font-bold uppercase tracking-wider text-muted">({d.owner_role.replace('_', ' ')})</span>}
+                  </td>
+                  <td className="px-3 py-2.5 hidden lg:table-cell text-muted">{d.os_name || '—'}</td>
+                  <td className="px-3 py-2.5">
+                    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider border-2 border-ink ${online ? 'bg-success text-white' : 'bg-surface text-muted'}`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${online ? 'bg-white animate-pulse' : 'bg-muted'}`}></span>
+                      {online ? 'Online' : 'Offline'}
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
 
       {/* Charts / Lists */}
